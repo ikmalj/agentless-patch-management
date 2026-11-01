@@ -72,6 +72,7 @@ Region `ap-southeast-5` (Asia Pacific, Malaysia). All resources are tagged `proj
 | `restore-baseline.ps1` | Returns hosts to their unpatched baseline AMI (EC2 replace root volume) |
 | `exp3-scale.ps1` | Experiment 3 (scalability): launch clones, run levels from baseline, teardown |
 | `evidence/` | Results of every test, cycle, restore and deploy (JSON, CSV) |
+| `site/` | Project website: landing page and results dashboard built from `evidence/` (see [Project Website](#project-website)) |
 | `build/` | Generated files (not in the repository) |
 
 ## Prerequisites
@@ -203,6 +204,33 @@ filter record = 'cycle' and mode = 'patch' and hosts_total > 0
 | fields @timestamp, run_id, hosts_total, duration_s, transitions, lambda_invocations, lambda_gb_s, cost_usd
 | sort @timestamp asc
 ```
+
+## Project Website
+
+`site/` is a static website that introduces the project and shows the evaluation results: success rate
+overall and per platform, the latest run per host, deployment time per host run, updates fixed by
+severity and every patch cycle. It needs no server and no AWS access.
+
+| File | Purpose |
+|---|---|
+| `site/index.html` | The page |
+| `site/assets/style.css`, `site/assets/app.js` | Styling and rendering (no libraries) |
+| `site/data/patch-data.js` | Generated data, loaded by the page |
+| `site/build_site_data.py` | Rebuilds the data from `evidence\cycle-patch-*.json` with the counting rules in `lambda/metrics.py` |
+
+After new patch runs, rebuild the data and open the page:
+
+```powershell
+python site\build_site_data.py
+start site\index.html
+```
+
+The generated data holds only what the page shows: no account ID, ARNs, instance IDs or IP addresses.
+Cost per cycle is not shown, because it is estimated from the execution history in CloudWatch and is
+not saved in `evidence\`.
+
+To publish, upload the contents of `site\` to any static host, for example an S3 bucket with static
+website hosting or GitHub Pages (Pages on a private repository needs a paid GitHub plan).
 
 ## Safety Defaults
 
