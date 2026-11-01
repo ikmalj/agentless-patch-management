@@ -1,0 +1,560 @@
+{
+ "start": "-P7D",
+ "periodOverride": "inherit",
+ "variables": [
+  {
+   "type": "pattern",
+   "pattern": "__DEFAULT_HOST__",
+   "inputType": "select",
+   "id": "host",
+   "label": "Host",
+   "defaultValue": "__DEFAULT_HOST__",
+   "visible": true,
+   "values": "__HOST_VALUES__"
+  }
+ ],
+ "widgets": [
+  {
+   "type": "text",
+   "x": 0,
+   "y": 0,
+   "width": 24,
+   "height": 3,
+   "properties": {
+    "markdown": "## Centralized Agentless Patch Management\n**EventBridge Scheduler \u2192 Step Functions \u2192 Lambda \u2192 SSH (RHEL 9) / WinRM (Windows Server 2022)** \u00b7 no agent on any host \u00b7 region __REGION__\n\n[Open the Step Functions executions](https://__REGION__.console.aws.amazon.com/states/home?region=__REGION__#/statemachines/view/__STATE_MACHINE_ARN__) \u00b7 The **Host** selector changes the *Selected host* row \u00b7 Colours: green from 95%, amber 80-95%, red below 80%",
+    "background": "solid"
+   }
+  },
+  {
+   "type": "custom",
+   "x": 0,
+   "y": 3,
+   "width": 24,
+   "height": 4,
+   "properties": {
+    "endpoint": "__WIDGET_FN_ARN__",
+    "params": {
+     "view": "kpi"
+    },
+    "title": "Patch Summary",
+    "updateOn": {
+     "refresh": true,
+     "resize": true,
+     "timeRange": true
+    }
+   }
+  },
+  {
+   "type": "custom",
+   "x": 0,
+   "y": 7,
+   "width": 16,
+   "height": 7,
+   "properties": {
+    "endpoint": "__WIDGET_FN_ARN__",
+    "params": {
+     "view": "hosts"
+    },
+    "title": "Host Status: latest patch run per host",
+    "updateOn": {
+     "refresh": true,
+     "resize": true,
+     "timeRange": true
+    }
+   }
+  },
+  {
+   "type": "custom",
+   "x": 16,
+   "y": 7,
+   "width": 8,
+   "height": 7,
+   "properties": {
+    "endpoint": "__WIDGET_FN_ARN__",
+    "params": {
+     "view": "severity"
+    },
+    "title": "Updates Fixed by Severity (verified by rescan)",
+    "updateOn": {
+     "refresh": true,
+     "resize": true,
+     "timeRange": true
+    }
+   }
+  },
+  {
+   "type": "metric",
+   "x": 0,
+   "y": 14,
+   "width": 5,
+   "height": 6,
+   "properties": {
+    "title": "Selected host __DEFAULT_HOST__: success rate",
+    "view": "gauge",
+    "region": "__REGION__",
+    "metrics": [
+     [
+      {
+       "expression": "100 * SUM(SEARCH('{__NAMESPACE__,Platform,Host} MetricName=\"PatchesSucceeded\" Host=\"__DEFAULT_HOST__\"', 'Sum')) / SUM(SEARCH('{__NAMESPACE__,Platform,Host} MetricName=\"PatchesAttempted\" Host=\"__DEFAULT_HOST__\"', 'Sum'))",
+       "label": "Verified / attempted (%)",
+       "id": "hrt",
+       "color": "#2ca02c"
+      }
+     ]
+    ],
+    "stat": "Sum",
+    "period": 300,
+    "setPeriodToTimeRange": true,
+    "yAxis": {
+     "left": {
+      "min": 0,
+      "max": 100
+     }
+    },
+    "annotations": {
+     "horizontal": [
+      {
+       "label": "Below 80%",
+       "value": 80,
+       "color": "#d62728",
+       "fill": "below"
+      },
+      {
+       "label": "Target 95%",
+       "value": 95,
+       "color": "#2ca02c",
+       "fill": "above"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "type": "metric",
+   "x": 5,
+   "y": 14,
+   "width": 9,
+   "height": 6,
+   "properties": {
+    "title": "Selected host __DEFAULT_HOST__: deployment time per run (s)",
+    "view": "timeSeries",
+    "region": "__REGION__",
+    "metrics": [
+     [
+      {
+       "expression": "SEARCH('{__NAMESPACE__,Platform,Host} MetricName=\"HostPatchSeconds\" Host=\"__DEFAULT_HOST__\"', 'Maximum')",
+       "label": "Deployment time (s)",
+       "id": "htm",
+       "color": "#7f7f7f"
+      }
+     ]
+    ],
+    "stat": "Maximum",
+    "period": 300,
+    "yAxis": {
+     "left": {
+      "min": 0,
+      "showUnits": false
+     }
+    },
+    "annotations": {
+     "horizontal": [
+      {
+       "label": "Lambda 15-min limit (900 s): installs run on the host",
+       "value": 900,
+       "color": "#d62728"
+      }
+     ]
+    },
+    "legend": {
+     "position": "hidden"
+    }
+   }
+  },
+  {
+   "type": "log",
+   "x": 14,
+   "y": 14,
+   "width": 10,
+   "height": 6,
+   "properties": {
+    "title": "Selected host __DEFAULT_HOST__: run history",
+    "region": "__REGION__",
+    "view": "table",
+    "query": "SOURCE '__LOG_GROUP__' | filter record = 'host' and host = '__DEFAULT_HOST__' | sort @timestamp desc | fields @timestamp, mode, status, unit, before, after, succeeded, attempted, duration_s, rebooted, healthy, failed_at | limit 20"
+   }
+  },
+  {
+   "type": "metric",
+   "x": 0,
+   "y": 20,
+   "width": 8,
+   "height": 7,
+   "properties": {
+    "title": "Patch Deployment Time per Host (Experiment 1, longest run in range, s)",
+    "view": "bar",
+    "region": "__REGION__",
+    "metrics": [
+     [
+      {
+       "expression": "SEARCH('{__NAMESPACE__,Platform,Host} MetricName=\"HostPatchSeconds\"', 'Maximum')",
+       "label": "${PROP('Dim.Host')}",
+       "id": "thost"
+      }
+     ]
+    ],
+    "stat": "Maximum",
+    "period": 300,
+    "setPeriodToTimeRange": true,
+    "yAxis": {
+     "left": {
+      "min": 0,
+      "label": "seconds",
+      "showUnits": false
+     }
+    },
+    "annotations": {
+     "horizontal": [
+      {
+       "label": "Lambda 15-min limit (900 s): installs run on the host",
+       "value": 900,
+       "color": "#d62728"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "type": "metric",
+   "x": 8,
+   "y": 20,
+   "width": 16,
+   "height": 7,
+   "properties": {
+    "title": "Deployment Time per Run (each point is one host in one patch run, s)",
+    "view": "timeSeries",
+    "region": "__REGION__",
+    "metrics": [
+     [
+      {
+       "expression": "SEARCH('{__NAMESPACE__,Platform,Host} MetricName=\"HostPatchSeconds\"', 'Maximum')",
+       "label": "${PROP('Dim.Host')}",
+       "id": "lhost"
+      }
+     ]
+    ],
+    "stat": "Maximum",
+    "period": 300,
+    "stacked": false,
+    "yAxis": {
+     "left": {
+      "min": 0,
+      "label": "seconds",
+      "showUnits": false
+     }
+    },
+    "annotations": {
+     "horizontal": [
+      {
+       "label": "Lambda 15-min limit (900 s): installs run on the host",
+       "value": 900,
+       "color": "#d62728"
+      }
+     ]
+    },
+    "legend": {
+     "position": "bottom"
+    }
+   }
+  },
+  {
+   "type": "log",
+   "x": 0,
+   "y": 27,
+   "width": 6,
+   "height": 7,
+   "properties": {
+    "title": "Host Outcomes (patch runs)",
+    "region": "__REGION__",
+    "view": "pie",
+    "query": "SOURCE '__LOG_GROUP__' | filter record = 'host' and mode = 'patch' | stats count(*) as host_runs by status"
+   }
+  },
+  {
+   "type": "log",
+   "x": 6,
+   "y": 27,
+   "width": 9,
+   "height": 7,
+   "properties": {
+    "title": "Scalability Across Multiple Hosts (Experiment 3, RHEL full-scope runs, x = hosts in run)",
+    "region": "__REGION__",
+    "view": "bar",
+    "query": "SOURCE '__LOG_GROUP__' | filter record = 'host' and mode = 'patch' and percent = 100 and platform = 'rhel' and status like /^patched/ | stats count(*) as hosts_in_run, max(duration_s) as run_s, avg(duration_s) as host_s by run_id | stats avg(run_s) as total_workflow_s, avg(host_s) as per_host_s by hosts_in_run | sort hosts_in_run asc"
+   }
+  },
+  {
+   "type": "metric",
+   "x": 15,
+   "y": 27,
+   "width": 9,
+   "height": 7,
+   "properties": {
+    "title": "Orchestration Layer (Step Functions, Lambda, SNS)",
+    "view": "singleValue",
+    "region": "__REGION__",
+    "metrics": [
+     [
+      "AWS/States",
+      "ExecutionsStarted",
+      "StateMachineArn",
+      "__STATE_MACHINE_ARN__",
+      {
+       "label": "Executions"
+      }
+     ],
+     [
+      "AWS/States",
+      "ExecutionsSucceeded",
+      "StateMachineArn",
+      "__STATE_MACHINE_ARN__",
+      {
+       "label": "Succeeded",
+       "color": "#2ca02c"
+      }
+     ],
+     [
+      "AWS/States",
+      "ExecutionsFailed",
+      "StateMachineArn",
+      "__STATE_MACHINE_ARN__",
+      {
+       "label": "Failed",
+       "color": "#d62728"
+      }
+     ],
+     [
+      "AWS/Lambda",
+      "Invocations",
+      "FunctionName",
+      "__RHEL_FN__",
+      {
+       "id": "li1",
+       "visible": false
+      }
+     ],
+     [
+      "AWS/Lambda",
+      "Errors",
+      "FunctionName",
+      "__RHEL_FN__",
+      {
+       "id": "le1",
+       "visible": false
+      }
+     ],
+     [
+      "AWS/Lambda",
+      "Invocations",
+      "FunctionName",
+      "__WIN_FN__",
+      {
+       "id": "li2",
+       "visible": false
+      }
+     ],
+     [
+      "AWS/Lambda",
+      "Errors",
+      "FunctionName",
+      "__WIN_FN__",
+      {
+       "id": "le2",
+       "visible": false
+      }
+     ],
+     [
+      "AWS/Lambda",
+      "Invocations",
+      "FunctionName",
+      "__METRICS_FN__",
+      {
+       "id": "li3",
+       "visible": false
+      }
+     ],
+     [
+      "AWS/Lambda",
+      "Errors",
+      "FunctionName",
+      "__METRICS_FN__",
+      {
+       "id": "le3",
+       "visible": false
+      }
+     ],
+     [
+      {
+       "expression": "SUM([li1,li2,li3])",
+       "label": "Lambda invocations",
+       "id": "linv"
+      }
+     ],
+     [
+      {
+       "expression": "SUM([le1,le2,le3])",
+       "label": "Lambda errors (incl. retried)",
+       "id": "lerr"
+      }
+     ],
+     [
+      "AWS/SNS",
+      "NumberOfNotificationsDelivered",
+      "TopicName",
+      "__TOPIC_NAME__",
+      {
+       "label": "Emails delivered"
+      }
+     ]
+    ],
+    "stat": "Sum",
+    "period": 300,
+    "setPeriodToTimeRange": true,
+    "sparkline": false
+   }
+  },
+  {
+   "type": "metric",
+   "x": 0,
+   "y": 34,
+   "width": 12,
+   "height": 6,
+   "properties": {
+    "title": "Step Functions Executions per Day",
+    "view": "timeSeries",
+    "region": "__REGION__",
+    "metrics": [
+     [
+      "AWS/States",
+      "ExecutionsSucceeded",
+      "StateMachineArn",
+      "__STATE_MACHINE_ARN__",
+      {
+       "label": "Succeeded",
+       "color": "#2ca02c"
+      }
+     ],
+     [
+      "AWS/States",
+      "ExecutionsFailed",
+      "StateMachineArn",
+      "__STATE_MACHINE_ARN__",
+      {
+       "label": "Failed",
+       "color": "#d62728"
+      }
+     ]
+    ],
+    "stat": "Sum",
+    "period": 86400,
+    "stacked": true,
+    "yAxis": {
+     "left": {
+      "min": 0,
+      "showUnits": false
+     }
+    },
+    "legend": {
+     "position": "bottom"
+    }
+   }
+  },
+  {
+   "type": "log",
+   "x": 12,
+   "y": 34,
+   "width": 12,
+   "height": 6,
+   "properties": {
+    "title": "Success Rate by Platform (from CloudWatch Logs)",
+    "region": "__REGION__",
+    "view": "table",
+    "query": "SOURCE '__LOG_GROUP__' | filter record = 'host' and mode = 'patch' and attempted > 0 | stats sum(succeeded) as verified, sum(attempted) as tried, 100 * sum(succeeded) / sum(attempted) as success_pct, count(*) as host_runs by platform, unit"
+   }
+  },
+  {
+   "type": "metric",
+   "x": 0,
+   "y": 40,
+   "width": 6,
+   "height": 6,
+   "properties": {
+    "title": "Estimated Operational Cost (Experiment 4, USD)",
+    "view": "singleValue",
+    "region": "__REGION__",
+    "metrics": [
+     [
+      "__NAMESPACE__",
+      "EstimatedCostUSD",
+      "StateMachine",
+      "__STATE_MACHINE_NAME__",
+      {
+       "stat": "Average",
+       "label": "Per patch cycle (avg)"
+      }
+     ],
+     [
+      "__NAMESPACE__",
+      "EstimatedCostUSD",
+      "StateMachine",
+      "__STATE_MACHINE_NAME__",
+      {
+       "stat": "Sum",
+       "label": "All cycles in range"
+      }
+     ]
+    ],
+    "period": 300,
+    "setPeriodToTimeRange": true,
+    "sparkline": false
+   }
+  },
+  {
+   "type": "log",
+   "x": 6,
+   "y": 40,
+   "width": 18,
+   "height": 6,
+   "properties": {
+    "title": "Cost per Cycle (list price before free tier)",
+    "region": "__REGION__",
+    "view": "table",
+    "query": "SOURCE '__LOG_GROUP__' | filter record = 'cycle' and mode = 'patch' | sort @timestamp desc | fields @timestamp, hosts_total as hosts, duration_s as cycle_s, transitions, lambda_invocations as invokes, lambda_gb_s as gb_s, cost_sfn_usd as sfn_usd, cost_lambda_usd as lambda_usd, cost_usd as total_usd | limit 20"
+   }
+  },
+  {
+   "type": "log",
+   "x": 0,
+   "y": 46,
+   "width": 24,
+   "height": 7,
+   "properties": {
+    "title": "Latest Host Results (scan and patch runs)",
+    "region": "__REGION__",
+    "view": "table",
+    "query": "SOURCE '__LOG_GROUP__' | filter record = 'host' | sort @timestamp desc | fields @timestamp, mode, host, status, unit, before, after, succeeded, attempted, duration_s, rebooted, healthy, failed_at | limit 30"
+   }
+  },
+  {
+   "type": "text",
+   "x": 0,
+   "y": 53,
+   "width": 24,
+   "height": 2,
+   "properties": {
+    "markdown": "**Control plane only.** Every value comes from Step Functions, Lambda, SNS and the serverless-patch-metrics log records. The coloured panels at the top are CloudWatch custom widgets drawn by the read-only Lambda serverless-patch-summary-widget. No monitoring agent is installed on any host. Success counts only updates confirmed fixed by the post-install rescan. Cost is a list-price estimate from the execution history, before the free tier. Microsoft Defender updates are excluded from the Windows counts by design. For an experiment, set the time range to that experiment's window.",
+    "background": "transparent"
+   }
+  }
+ ]
+}

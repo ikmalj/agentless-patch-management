@@ -1,0 +1,67 @@
+{
+  "execution": "arn:aws:states:ap-southeast-5:588589592508:execution:serverless-patch-cycle:manual-scan-20261027-054140",
+  "status": "SUCCEEDED",
+  "error": null,
+  "report": {
+    "run_id": "manual-scan-20261027-054140",
+    "mode": "scan",
+    "started": "2026-10-26T21:41:41.621Z",
+    "finished": "2026-10-26T21:41:48.534Z",
+    "duration_s": 6.9,
+    "hosts_total": 2,
+    "patched": 0,
+    "patched_partial": 0,
+    "compliant": 0,
+    "scanned": 2,
+    "skipped": 0,
+    "failed": 0,
+    "results": [
+      {
+        "host": "serverless-patch-rhel-01",
+        "ip": "10.0.1.175",
+        "instance_id": "i-0ba983a12665d852f",
+        "platform": "rhel",
+        "workload": "nginx",
+        "status": "scanned",
+        "advisories_before": 388,
+        "by_severity_before": {
+          "Critical": 2,
+          "Important": 166,
+          "Moderate": 197,
+          "Low": 23
+        },
+        "pending_security_packages_before": 167,
+        "pending_packages_before": 281,
+        "kernel": "5.14.0-284.90.1.el9_2.x86_64",
+        "agent_present": false,
+        "healthy": true,
+        "health_detail": "http 200",
+        "scan_s": 4.4,
+        "duration_s": 5.8
+      },
+      {
+        "host": "serverless-patch-rhel-02",
+        "ip": "10.0.1.254",
+        "instance_id": "i-008641b7be92f9871",
+        "platform": "rhel",
+        "workload": "mysql",
+        "status": "scanned",
+        "advisories_before": 388,
+        "by_severity_before": {
+          "Critical": 2,
+          "Important": 166,
+          "Moderate": 197,
+          "Low": 23
+        },
+        "pending_security_packages_before": 168,
+        "pending_packages_before": 283,
+        "kernel": "5.14.0-284.90.1.el9_2.x86_64",
+        "agent_present": false,
+        "healthy": true,
+        "health_detail": "sakila.film rows 1000",
+        "scan_s": 4.5,
+        "duration_s": 6.7
+      }
+    ]
+  }
+}

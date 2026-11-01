@@ -1,0 +1,52 @@
+{
+  "execution": "arn:aws:states:ap-southeast-5:588589592508:execution:serverless-patch-cycle:096adfe7-a0f3-400d-ba61-80d03d74267f",
+  "status": "FAILED",
+  "error": "HostsFailed",
+  "report": {
+    "run_id": "096adfe7-a0f3-400d-ba61-80d03d74267f",
+    "mode": "patch",
+    "percent": 100,
+    "started": "2026-10-26T23:52:46.044Z",
+    "finished": "2026-10-26T23:54:55.116Z",
+    "duration_s": 129.1,
+    "hosts_total": 2,
+    "patched": 0,
+    "patched_partial": 0,
+    "compliant": 0,
+    "scanned": 0,
+    "skipped": 0,
+    "failed": 2,
+    "results": [
+      {
+        "host": "serverless-patch-rhel-01",
+        "ip": "10.0.1.175",
+        "instance_id": "i-0ba983a12665d852f",
+        "platform": "rhel",
+        "workload": "nginx",
+        "status": "failed",
+        "failed_at": "install_status",
+        "fail_detail": {
+          "Error": "HostUnreachable",
+          "Cause": "{\"errorMessage\":\"10.0.1.175: SSHException: Error reading SSH protocol banner\",\"errorType\":\"HostUnreachable\",\"requestId\":\"80b9caeb-809c-49c1-8dd5-d0703dd53cba\",\"stackTrace\":[\"  File \\\"/var/task/patch_rhel.py\\\", line 421, in lambda_handler\\n    c = _connect(host[\\\"ip\\\"])\\n\",\"  File \\\"/var/task/patch_rhel.py\\\", line 111, in _connect\\n    raise HostUnreachable(f\\\"{ip}: {type(e).__name__}: {e}\\\") from None\\n\"]}"
+        },
+        "advisories_before": 388,
+        "duration_s": 128.9
+      },
+      {
+        "host": "serverless-patch-rhel-02",
+        "ip": "10.0.1.254",
+        "instance_id": "i-008641b7be92f9871",
+        "platform": "rhel",
+        "workload": "mysql",
+        "status": "failed",
+        "failed_at": "install_status",
+        "fail_detail": {
+          "Error": "HostUnreachable",
+          "Cause": "{\"errorMessage\":\"10.0.1.254: SSHException: Error reading SSH protocol banner\",\"errorType\":\"HostUnreachable\",\"requestId\":\"b8620d69-9792-4b8e-a05c-390f54cabb9a\",\"stackTrace\":[\"  File \\\"/var/task/patch_rhel.py\\\", line 421, in lambda_handler\\n    c = _connect(host[\\\"ip\\\"])\\n\",\"  File \\\"/var/task/patch_rhel.py\\\", line 111, in _connect\\n    raise HostUnreachable(f\\\"{ip}: {type(e).__name__}: {e}\\\") from None\\n\"]}"
+        },
+        "advisories_before": 388,
+        "duration_s": 128.2
+      }
+    ]
+  }
+}

@@ -1,0 +1,1208 @@
+{
+  "Comment": "serverless-patch-cycle: agentless patch orchestration. RHEL: security advisories via dnf upgrade --security over SSH. Windows: countable updates (Defender excluded) via a one-shot SYSTEM scheduled task over WinRM. Phase D: per-cycle EMF metrics (serverless-patch-metrics) and SNS notification (serverless-patch-notify).",
+  "QueryLanguage": "JSONata",
+  "StartAt": "Init Run",
+  "States": {
+    "Init Run": {
+      "Type": "Pass",
+      "Assign": {
+        "exec_run_id": "{% $states.context.Execution.Name %}",
+        "exec_started": "{% $states.context.Execution.StartTime %}",
+        "exec_mode": "{% $exists($states.input.mode) ? $states.input.mode : 'scan' %}",
+        "exec_reboot": "{% $states.input.reboot = false ? false : true %}",
+        "exec_targets": "{% $exists($states.input.targets) ? $states.input.targets : [] %}",
+        "exec_percent": "{% $exists($states.input.percent) ? $states.input.percent : 100 %}",
+        "exec_notify": "{% $exists($states.input.notify) ? ($states.input.notify = true) : (($exists($states.input.mode) ? $states.input.mode : 'scan') = 'patch') %}"
+      },
+      "Next": "Is Mode Valid"
+    },
+    "Is Mode Valid": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Condition": "{% $exec_mode in ['scan', 'patch'] and $type($exec_percent) = 'number' and $exec_percent > 0 and $exec_percent <= 100 %}",
+          "Next": "Discover Targets"
+        }
+      ],
+      "Default": "Invalid Mode"
+    },
+    "Invalid Mode": {
+      "Type": "Fail",
+      "Error": "InvalidMode",
+      "Cause": "mode must be scan or patch, and percent a number from 1 to 100"
+    },
+    "Discover Targets": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:ec2:describeInstances",
+      "Arguments": {
+        "Filters": [
+          {
+            "Name": "tag:PatchTarget",
+            "Values": [
+              "true"
+            ]
+          },
+          {
+            "Name": "tag:project",
+            "Values": [
+              "serverless-patch"
+            ]
+          },
+          {
+            "Name": "instance-state-name",
+            "Values": [
+              "running"
+            ]
+          }
+        ]
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Output": "{% ( $all := [$states.result.Reservations.Instances.{'instance_id': InstanceId, 'ip': PrivateIpAddress, 'name': Tags[Key='Name'].Value, 'platform': Tags[Key='PatchOS'].Value, 'workload': Tags[Key='Workload'].Value}]; $count($exec_targets) = 0 ? $all : [$all[name in $exec_targets]] ) %}",
+      "Next": "Patch Hosts",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Assign": {
+            "run_error": "{% $states.errorOutput %}",
+            "run_error_state": "Discover Targets"
+          },
+          "Next": "Format Run Error"
+        }
+      ]
+    },
+    "Patch Hosts": {
+      "Type": "Map",
+      "Items": "{% $states.input %}",
+      "MaxConcurrency": 10,
+      "ItemSelector": {
+        "host": "{% $states.context.Map.Item.Value %}",
+        "run_id": "{% $exec_run_id %}",
+        "mode": "{% $exec_mode %}",
+        "reboot": "{% $exec_reboot %}",
+        "percent": "{% $exec_percent %}"
+      },
+      "ItemProcessor": {
+        "ProcessorConfig": {
+          "Mode": "INLINE"
+        },
+        "StartAt": "Init Host",
+        "States": {
+          "Init Host": {
+            "Type": "Pass",
+            "Assign": {
+              "h": "{% $states.input.host %}",
+              "run_id": "{% $states.input.run_id %}",
+              "mode": "{% $states.input.mode %}",
+              "allow_reboot": "{% $states.input.reboot %}",
+              "pct": "{% $states.input.percent %}",
+              "selected": [],
+              "t0": "{% $states.context.State.EnteredTime %}",
+              "pre": {},
+              "scan_before": {},
+              "install": {},
+              "boot_before": "",
+              "post": {},
+              "scan_after": {},
+              "polls": 0,
+              "failed_at": "",
+              "fail_detail": {}
+            },
+            "Next": "Which Platform"
+          },
+          "Which Platform": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Condition": "{% $h.platform = 'rhel' %}",
+                "Next": "RHEL Precheck"
+              },
+              {
+                "Condition": "{% $h.platform = 'windows' %}",
+                "Next": "WIN Precheck"
+              }
+            ],
+            "Default": "Unknown Platform"
+          },
+          "Unknown Platform": {
+            "Type": "Pass",
+            "Output": "{% {'host': $h.name, 'ip': $h.ip, 'instance_id': $h.instance_id, 'platform': $h.platform, 'workload': $h.workload, 'unit': $h.platform = 'windows' ? 'KB' : 'RHSA', 'status': 'skipped', 'note': 'PatchOS tag missing or unsupported', 'duration_s': $round(($toMillis($states.context.State.EnteredTime) - $toMillis($t0)) / 1000, 1)} %}",
+            "End": true
+          },
+          "Host Not Ready": {
+            "Type": "Pass",
+            "Assign": {
+              "failed_at": "precheck",
+              "fail_detail": "{% {'reasons': $pre.reasons} %}"
+            },
+            "Next": "Host Failed"
+          },
+          "Host Compliant": {
+            "Type": "Pass",
+            "Output": "{% {'host': $h.name, 'ip': $h.ip, 'instance_id': $h.instance_id, 'platform': $h.platform, 'workload': $h.workload, 'unit': $h.platform = 'windows' ? 'KB' : 'RHSA', 'status': 'compliant', 'advisories_before': $scan_before.advisories, 'pending_security_packages_before': 0, 'pending_packages_before': $scan_before.pending_packages, 'kernel': $pre.kernel, 'defender_excluded': $scan_before.defender_excluded, 'duration_s': $round(($toMillis($states.context.State.EnteredTime) - $toMillis($t0)) / 1000, 1)} %}",
+            "End": true
+          },
+          "Host Scanned": {
+            "Type": "Pass",
+            "Output": "{% {'host': $h.name, 'ip': $h.ip, 'instance_id': $h.instance_id, 'platform': $h.platform, 'workload': $h.workload, 'unit': $h.platform = 'windows' ? 'KB' : 'RHSA', 'status': 'scanned', 'advisories_before': $scan_before.advisories, 'by_severity_before': $scan_before.by_severity, 'pending_security_packages_before': $scan_before.pending_security_packages, 'pending_packages_before': $scan_before.pending_packages, 'kernel': $pre.kernel, 'agent_present': $pre.agent_present, 'healthy': $pre.health.healthy, 'health_detail': $pre.health.detail, 'update_ids': $scan_before.update_ids, 'defender_excluded': $scan_before.defender_excluded, 'scan_method': $scan_before.method, 'scan_s': $scan_before.scan_s, 'duration_s': $round(($toMillis($states.context.State.EnteredTime) - $toMillis($t0)) / 1000, 1)} %}",
+            "End": true
+          },
+          "Install Timed Out": {
+            "Type": "Pass",
+            "Assign": {
+              "failed_at": "install",
+              "fail_detail": "{% {'reason': 'install still running after ' & $string($polls) & ' polls'} %}"
+            },
+            "Next": "Host Failed"
+          },
+          "Install Failed": {
+            "Type": "Pass",
+            "Assign": {
+              "failed_at": "install",
+              "fail_detail": "{% $install %}"
+            },
+            "Next": "Host Failed"
+          },
+          "Host Patched": {
+            "Type": "Pass",
+            "Output": "{% {'host': $h.name, 'ip': $h.ip, 'instance_id': $h.instance_id, 'platform': $h.platform, 'workload': $h.workload, 'unit': $h.platform = 'windows' ? 'KB' : 'RHSA', 'status': ($pct < 100 ? $scan_after.checked_remaining = 0 : $scan_after.advisories = 0) ? 'patched' : 'patched_partial', 'scope_percent': $pct, 'advisories_selected': $pct < 100 ? $count($selected) : $scan_before.advisories, 'selected_remaining': $pct < 100 ? $scan_after.checked_remaining : $scan_after.advisories, 'advisories_before': $scan_before.advisories, 'advisories_after': $scan_after.advisories, 'advisories_applied': $scan_before.advisories - $scan_after.advisories, 'by_severity_before': $scan_before.by_severity, 'by_severity_after': $scan_after.by_severity, 'pending_security_packages_before': $scan_before.pending_security_packages, 'pending_security_packages_after': $scan_after.pending_security_packages, 'pending_packages_before': $scan_before.pending_packages, 'pending_packages_after': $scan_after.pending_packages, 'packages_upgraded': $install.packages_upgraded, 'packages_installed': $install.packages_installed, 'packages_removed': $install.packages_removed, 'updates_failed': $install.updates_failed, 'update_results': $install.update_results, 'reboot_required': $install.reboot_required, 'rebooted': $post.rebooted, 'reboot_reason': $install.reboot_reason, 'kernel_before': $pre.kernel, 'kernel_after': $post.kernel, 'healthy_after': $post.healthy, 'health_detail': $post.detail, 'defender_excluded': $scan_before.defender_excluded, 'install_polls': $polls, 'install_log': $install.log, 'duration_s': $round(($toMillis($states.context.State.EnteredTime) - $toMillis($t0)) / 1000, 1)} %}",
+            "End": true
+          },
+          "Host Failed": {
+            "Type": "Pass",
+            "Output": "{% {'host': $h.name, 'ip': $h.ip, 'instance_id': $h.instance_id, 'platform': $h.platform, 'workload': $h.workload, 'unit': $h.platform = 'windows' ? 'KB' : 'RHSA', 'status': 'failed', 'failed_at': $failed_at, 'fail_detail': $fail_detail, 'advisories_before': $scan_before.advisories, 'duration_s': $round(($toMillis($states.context.State.EnteredTime) - $toMillis($t0)) / 1000, 1)} %}",
+            "End": true
+          },
+          "RHEL Precheck": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+              "FunctionName": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-rhel",
+              "Payload": "{% {'action': 'precheck', 'host': $h} %}"
+            },
+            "TimeoutSeconds": 330,
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              },
+              {
+                "ErrorEquals": [
+                  "HostUnreachable"
+                ],
+                "IntervalSeconds": 15,
+                "MaxAttempts": 2,
+                "BackoffRate": 1
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Assign": {
+                  "failed_at": "precheck",
+                  "fail_detail": "{% $states.errorOutput %}"
+                },
+                "Next": "Host Failed"
+              }
+            ],
+            "Assign": {
+              "pre": "{% $states.result.Payload %}"
+            },
+            "Next": "RHEL Is Host Ready"
+          },
+          "RHEL Is Host Ready": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Condition": "{% $pre.ready = true %}",
+                "Next": "RHEL Scan Before"
+              }
+            ],
+            "Default": "Host Not Ready"
+          },
+          "RHEL Scan Before": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+              "FunctionName": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-rhel",
+              "Payload": "{% {'action': 'scan', 'host': $h, 'refresh': true} %}"
+            },
+            "TimeoutSeconds": 330,
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              },
+              {
+                "ErrorEquals": [
+                  "HostUnreachable"
+                ],
+                "IntervalSeconds": 15,
+                "MaxAttempts": 2,
+                "BackoffRate": 1
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Assign": {
+                  "failed_at": "scan_before",
+                  "fail_detail": "{% $states.errorOutput %}"
+                },
+                "Next": "Host Failed"
+              }
+            ],
+            "Assign": {
+              "scan_before": "{% $states.result.Payload %}"
+            },
+            "Next": "RHEL Has Pending"
+          },
+          "RHEL Has Pending": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Condition": "{% $scan_before.advisories = 0 %}",
+                "Next": "Host Compliant"
+              },
+              {
+                "Condition": "{% $mode = 'scan' %}",
+                "Next": "Host Scanned"
+              }
+            ],
+            "Default": "RHEL Start Install"
+          },
+          "RHEL Start Install": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+              "FunctionName": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-rhel",
+              "Payload": "{% {'action': 'install_start', 'host': $h, 'run_id': $run_id, 'percent': $pct} %}"
+            },
+            "TimeoutSeconds": 330,
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              },
+              {
+                "ErrorEquals": [
+                  "HostUnreachable"
+                ],
+                "IntervalSeconds": 15,
+                "MaxAttempts": 2,
+                "BackoffRate": 1
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Assign": {
+                  "failed_at": "install_start",
+                  "fail_detail": "{% $states.errorOutput %}"
+                },
+                "Next": "Host Failed"
+              }
+            ],
+            "Assign": {
+              "install": "{% $states.result.Payload %}",
+              "selected": "{% $states.result.Payload.selected_ids ? $states.result.Payload.selected_ids : [] %}"
+            },
+            "Next": "RHEL Wait For Install"
+          },
+          "RHEL Wait For Install": {
+            "Type": "Wait",
+            "Seconds": 60,
+            "Next": "RHEL Install Status"
+          },
+          "RHEL Install Status": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+              "FunctionName": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-rhel",
+              "Payload": "{% {'action': 'install_status', 'host': $h, 'run_id': $run_id} %}"
+            },
+            "TimeoutSeconds": 330,
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              },
+              {
+                "ErrorEquals": [
+                  "HostUnreachable"
+                ],
+                "IntervalSeconds": 30,
+                "MaxAttempts": 20,
+                "BackoffRate": 1
+              },
+              {
+                "ErrorEquals": [
+                  "CommandFailed"
+                ],
+                "IntervalSeconds": 30,
+                "MaxAttempts": 5,
+                "BackoffRate": 1
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Assign": {
+                  "failed_at": "install_status",
+                  "fail_detail": "{% $states.errorOutput %}"
+                },
+                "Next": "Host Failed"
+              }
+            ],
+            "Assign": {
+              "install": "{% $states.result.Payload %}",
+              "polls": "{% $polls + 1 %}",
+              "selected": "{% $states.result.Payload.selected_ids ? $states.result.Payload.selected_ids : $selected %}"
+            },
+            "Next": "RHEL Is Install Done"
+          },
+          "RHEL Is Install Done": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Condition": "{% $install.state = 'running' and $polls < 120 %}",
+                "Next": "RHEL Wait For Install"
+              },
+              {
+                "Condition": "{% $install.state = 'running' %}",
+                "Next": "Install Timed Out"
+              },
+              {
+                "Condition": "{% $install.state = 'succeeded' and $install.reboot_required = true and $allow_reboot = true %}",
+                "Next": "RHEL Reboot"
+              },
+              {
+                "Condition": "{% $install.state = 'succeeded' %}",
+                "Next": "RHEL Post Health"
+              }
+            ],
+            "Default": "Install Failed"
+          },
+          "RHEL Reboot": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+              "FunctionName": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-rhel",
+              "Payload": "{% {'action': 'reboot', 'host': $h, 'run_id': $run_id} %}"
+            },
+            "TimeoutSeconds": 330,
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Assign": {
+                  "failed_at": "reboot",
+                  "fail_detail": "{% $states.errorOutput %}"
+                },
+                "Next": "Host Failed"
+              }
+            ],
+            "Assign": {
+              "boot_before": "{% $states.result.Payload.boot_id_before %}"
+            },
+            "Next": "RHEL Wait For Reboot"
+          },
+          "RHEL Wait For Reboot": {
+            "Type": "Wait",
+            "Seconds": 60,
+            "Next": "RHEL Post Health"
+          },
+          "RHEL Post Health": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+              "FunctionName": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-rhel",
+              "Payload": "{% {'action': 'health', 'host': $h, 'strict': true, 'boot_id_before': $boot_before} %}"
+            },
+            "TimeoutSeconds": 330,
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              },
+              {
+                "ErrorEquals": [
+                  "HostUnreachable",
+                  "RebootPending"
+                ],
+                "IntervalSeconds": 20,
+                "MaxAttempts": 15,
+                "BackoffRate": 1
+              },
+              {
+                "ErrorEquals": [
+                  "WorkloadNotHealthy"
+                ],
+                "IntervalSeconds": 20,
+                "MaxAttempts": 6,
+                "BackoffRate": 1
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Assign": {
+                  "failed_at": "post_health",
+                  "fail_detail": "{% $states.errorOutput %}"
+                },
+                "Next": "Host Failed"
+              }
+            ],
+            "Assign": {
+              "post": "{% $states.result.Payload %}"
+            },
+            "Next": "RHEL Scan After"
+          },
+          "RHEL Scan After": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+              "FunctionName": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-rhel",
+              "Payload": "{% {'action': 'scan', 'host': $h, 'refresh': false, 'check_ids': $selected} %}"
+            },
+            "TimeoutSeconds": 330,
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              },
+              {
+                "ErrorEquals": [
+                  "HostUnreachable"
+                ],
+                "IntervalSeconds": 15,
+                "MaxAttempts": 2,
+                "BackoffRate": 1
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Assign": {
+                  "failed_at": "scan_after",
+                  "fail_detail": "{% $states.errorOutput %}"
+                },
+                "Next": "Host Failed"
+              }
+            ],
+            "Assign": {
+              "scan_after": "{% $states.result.Payload %}"
+            },
+            "Next": "Host Patched"
+          },
+          "WIN Precheck": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+              "FunctionName": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-windows",
+              "Payload": "{% {'action': 'precheck', 'host': $h} %}"
+            },
+            "TimeoutSeconds": 930,
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              },
+              {
+                "ErrorEquals": [
+                  "HostUnreachable"
+                ],
+                "IntervalSeconds": 30,
+                "MaxAttempts": 4,
+                "BackoffRate": 1
+              },
+              {
+                "ErrorEquals": [
+                  "UpdateServiceBusy"
+                ],
+                "IntervalSeconds": 60,
+                "MaxAttempts": 10,
+                "BackoffRate": 1
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Assign": {
+                  "failed_at": "precheck",
+                  "fail_detail": "{% $states.errorOutput %}"
+                },
+                "Next": "Host Failed"
+              }
+            ],
+            "Assign": {
+              "pre": "{% $states.result.Payload %}"
+            },
+            "Next": "WIN Is Host Ready"
+          },
+          "WIN Is Host Ready": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Condition": "{% $pre.ready = true %}",
+                "Next": "WIN Scan Before"
+              }
+            ],
+            "Default": "Host Not Ready"
+          },
+          "WIN Scan Before": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+              "FunctionName": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-windows",
+              "Payload": "{% {'action': 'scan', 'host': $h, 'refresh': true} %}"
+            },
+            "TimeoutSeconds": 930,
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              },
+              {
+                "ErrorEquals": [
+                  "HostUnreachable"
+                ],
+                "IntervalSeconds": 30,
+                "MaxAttempts": 4,
+                "BackoffRate": 1
+              },
+              {
+                "ErrorEquals": [
+                  "UpdateServiceBusy"
+                ],
+                "IntervalSeconds": 60,
+                "MaxAttempts": 10,
+                "BackoffRate": 1
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Assign": {
+                  "failed_at": "scan_before",
+                  "fail_detail": "{% $states.errorOutput %}"
+                },
+                "Next": "Host Failed"
+              }
+            ],
+            "Assign": {
+              "scan_before": "{% $states.result.Payload %}"
+            },
+            "Next": "WIN Has Pending"
+          },
+          "WIN Has Pending": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Condition": "{% $scan_before.advisories = 0 %}",
+                "Next": "Host Compliant"
+              },
+              {
+                "Condition": "{% $mode = 'scan' %}",
+                "Next": "Host Scanned"
+              }
+            ],
+            "Default": "WIN Start Install"
+          },
+          "WIN Start Install": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+              "FunctionName": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-windows",
+              "Payload": "{% {'action': 'install_start', 'host': $h, 'run_id': $run_id, 'percent': $pct} %}"
+            },
+            "TimeoutSeconds": 930,
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              },
+              {
+                "ErrorEquals": [
+                  "HostUnreachable"
+                ],
+                "IntervalSeconds": 30,
+                "MaxAttempts": 4,
+                "BackoffRate": 1
+              },
+              {
+                "ErrorEquals": [
+                  "UpdateServiceBusy"
+                ],
+                "IntervalSeconds": 60,
+                "MaxAttempts": 10,
+                "BackoffRate": 1
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Assign": {
+                  "failed_at": "install_start",
+                  "fail_detail": "{% $states.errorOutput %}"
+                },
+                "Next": "Host Failed"
+              }
+            ],
+            "Assign": {
+              "install": "{% $states.result.Payload %}",
+              "selected": "{% $states.result.Payload.selected_ids ? $states.result.Payload.selected_ids : [] %}"
+            },
+            "Next": "WIN Wait For Install"
+          },
+          "WIN Wait For Install": {
+            "Type": "Wait",
+            "Seconds": 60,
+            "Next": "WIN Install Status"
+          },
+          "WIN Install Status": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+              "FunctionName": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-windows",
+              "Payload": "{% {'action': 'install_status', 'host': $h, 'run_id': $run_id} %}"
+            },
+            "TimeoutSeconds": 930,
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              },
+              {
+                "ErrorEquals": [
+                  "HostUnreachable"
+                ],
+                "IntervalSeconds": 30,
+                "MaxAttempts": 20,
+                "BackoffRate": 1
+              },
+              {
+                "ErrorEquals": [
+                  "CommandFailed"
+                ],
+                "IntervalSeconds": 30,
+                "MaxAttempts": 5,
+                "BackoffRate": 1
+              },
+              {
+                "ErrorEquals": [
+                  "UpdateServiceBusy"
+                ],
+                "IntervalSeconds": 60,
+                "MaxAttempts": 10,
+                "BackoffRate": 1
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Assign": {
+                  "failed_at": "install_status",
+                  "fail_detail": "{% $states.errorOutput %}"
+                },
+                "Next": "Host Failed"
+              }
+            ],
+            "Assign": {
+              "install": "{% $states.result.Payload %}",
+              "polls": "{% $polls + 1 %}",
+              "selected": "{% $states.result.Payload.selected_ids ? $states.result.Payload.selected_ids : $selected %}"
+            },
+            "Next": "WIN Is Install Done"
+          },
+          "WIN Is Install Done": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Condition": "{% $install.state = 'running' and $polls < 180 %}",
+                "Next": "WIN Wait For Install"
+              },
+              {
+                "Condition": "{% $install.state = 'running' %}",
+                "Next": "Install Timed Out"
+              },
+              {
+                "Condition": "{% $install.state = 'succeeded' and $install.reboot_required = true and $allow_reboot = true %}",
+                "Next": "WIN Reboot"
+              },
+              {
+                "Condition": "{% $install.state = 'succeeded' %}",
+                "Next": "WIN Post Health"
+              }
+            ],
+            "Default": "Install Failed"
+          },
+          "WIN Reboot": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+              "FunctionName": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-windows",
+              "Payload": "{% {'action': 'reboot', 'host': $h, 'run_id': $run_id} %}"
+            },
+            "TimeoutSeconds": 930,
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Assign": {
+                  "failed_at": "reboot",
+                  "fail_detail": "{% $states.errorOutput %}"
+                },
+                "Next": "Host Failed"
+              }
+            ],
+            "Assign": {
+              "boot_before": "{% $states.result.Payload.boot_id_before %}"
+            },
+            "Next": "WIN Wait For Reboot"
+          },
+          "WIN Wait For Reboot": {
+            "Type": "Wait",
+            "Seconds": 120,
+            "Next": "WIN Post Health"
+          },
+          "WIN Post Health": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+              "FunctionName": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-windows",
+              "Payload": "{% {'action': 'health', 'host': $h, 'strict': true, 'boot_id_before': $boot_before} %}"
+            },
+            "TimeoutSeconds": 930,
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              },
+              {
+                "ErrorEquals": [
+                  "HostUnreachable",
+                  "RebootPending"
+                ],
+                "IntervalSeconds": 30,
+                "MaxAttempts": 40,
+                "BackoffRate": 1
+              },
+              {
+                "ErrorEquals": [
+                  "WorkloadNotHealthy"
+                ],
+                "IntervalSeconds": 30,
+                "MaxAttempts": 10,
+                "BackoffRate": 1
+              },
+              {
+                "ErrorEquals": [
+                  "UpdateServiceBusy"
+                ],
+                "IntervalSeconds": 60,
+                "MaxAttempts": 10,
+                "BackoffRate": 1
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Assign": {
+                  "failed_at": "post_health",
+                  "fail_detail": "{% $states.errorOutput %}"
+                },
+                "Next": "Host Failed"
+              }
+            ],
+            "Assign": {
+              "post": "{% $states.result.Payload %}"
+            },
+            "Next": "WIN Scan After"
+          },
+          "WIN Scan After": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+              "FunctionName": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-windows",
+              "Payload": "{% {'action': 'scan', 'host': $h, 'refresh': false, 'check_ids': $selected} %}"
+            },
+            "TimeoutSeconds": 930,
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              },
+              {
+                "ErrorEquals": [
+                  "HostUnreachable"
+                ],
+                "IntervalSeconds": 30,
+                "MaxAttempts": 4,
+                "BackoffRate": 1
+              },
+              {
+                "ErrorEquals": [
+                  "UpdateServiceBusy"
+                ],
+                "IntervalSeconds": 60,
+                "MaxAttempts": 10,
+                "BackoffRate": 1
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Assign": {
+                  "failed_at": "scan_after",
+                  "fail_detail": "{% $states.errorOutput %}"
+                },
+                "Next": "Host Failed"
+              }
+            ],
+            "Assign": {
+              "scan_after": "{% $states.result.Payload %}"
+            },
+            "Next": "Host Patched"
+          }
+        }
+      },
+      "Next": "Summarize Run",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Assign": {
+            "run_error": "{% $states.errorOutput %}",
+            "run_error_state": "Patch Hosts"
+          },
+          "Next": "Format Run Error"
+        }
+      ]
+    },
+    "Summarize Run": {
+      "Type": "Pass",
+      "Output": "{% ( $r := $states.input; {'run_id': $exec_run_id, 'mode': $exec_mode, 'percent': $exec_percent, 'started': $exec_started, 'finished': $states.context.State.EnteredTime, 'duration_s': $round(($toMillis($states.context.State.EnteredTime) - $toMillis($exec_started)) / 1000, 1), 'hosts_total': $count($r), 'patched': $count($r[status = 'patched']), 'patched_partial': $count($r[status = 'patched_partial']), 'compliant': $count($r[status = 'compliant']), 'scanned': $count($r[status = 'scanned']), 'skipped': $count($r[status = 'skipped']), 'failed': $count($r[status = 'failed']), 'results': $r} ) %}",
+      "Next": "Record Metrics"
+    },
+    "Record Metrics": {
+      "Type": "Task",
+      "Comment": "EMF metrics + cost estimate + notification text. Never connects to a host. Output is the unchanged summary.",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-metrics",
+        "Payload": "{% {'kind': 'cycle', 'report': $states.input, 'execution_arn': $states.context.Execution.Id, 'notify': $exec_notify} %}"
+      },
+      "TimeoutSeconds": 90,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Assign": {
+            "note_subject": "{% 'serverless-patch ' & $exec_mode & ' run finished (metrics step failed): ' & $string($states.input.failed) & ' of ' & $string($states.input.hosts_total) & ' hosts failed' %}",
+            "note_message": "{% 'The metrics step failed, so this is the raw run summary.' & '\n\nMetrics error: ' & $string($states.errorOutput) & '\n\nSummary:\n' & $string($states.input) %}"
+          },
+          "Output": "{% $states.input %}",
+          "Next": "Should Notify"
+        }
+      ],
+      "Assign": {
+        "note_subject": "{% $states.result.Payload.subject %}",
+        "note_message": "{% $states.result.Payload.message %}"
+      },
+      "Output": "{% $states.input %}",
+      "Next": "Should Notify"
+    },
+    "Should Notify": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Condition": "{% $exec_notify %}",
+          "Next": "Notify Result"
+        }
+      ],
+      "Default": "Any Host Failed"
+    },
+    "Notify Result": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Arguments": {
+        "TopicArn": "arn:aws:sns:ap-southeast-5:588589592508:serverless-patch-notify",
+        "Subject": "{% $substring($note_subject, 0, 99) %}",
+        "Message": "{% $note_message %}"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Output": "{% $states.input %}",
+          "Next": "Any Host Failed"
+        }
+      ],
+      "Output": "{% $states.input %}",
+      "Next": "Any Host Failed"
+    },
+    "Any Host Failed": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Condition": "{% $states.input.failed > 0 %}",
+          "Next": "Run Has Failures"
+        }
+      ],
+      "Default": "Run Complete"
+    },
+    "Run Has Failures": {
+      "Type": "Fail",
+      "Error": "HostsFailed",
+      "Cause": "{% $string($states.input) %}"
+    },
+    "Run Complete": {
+      "Type": "Succeed"
+    },
+    "Format Run Error": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-metrics",
+        "Payload": "{% {'kind': 'run_error', 'error': $run_error, 'failed_state': $run_error_state, 'run_id': $exec_run_id, 'mode': $exec_mode, 'percent': $exec_percent, 'started': $exec_started, 'execution_arn': $states.context.Execution.Id, 'notify': true} %}"
+      },
+      "TimeoutSeconds": 60,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Assign": {
+            "note_subject": "{% 'serverless-patch ' & $exec_mode & ' run ERROR: ' & $string($run_error.Error) & ' at ' & $run_error_state %}",
+            "note_message": "{% 'Patch cycle ' & $exec_run_id & ' stopped at ' & $run_error_state & '.\n\nError: ' & $string($run_error.Error) & '\nCause: ' & $string($run_error.Cause) %}"
+          },
+          "Next": "Notify Run Error"
+        }
+      ],
+      "Assign": {
+        "note_subject": "{% $states.result.Payload.subject %}",
+        "note_message": "{% $states.result.Payload.message %}"
+      },
+      "Next": "Notify Run Error"
+    },
+    "Notify Run Error": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Arguments": {
+        "TopicArn": "arn:aws:sns:ap-southeast-5:588589592508:serverless-patch-notify",
+        "Subject": "{% $substring($note_subject, 0, 99) %}",
+        "Message": "{% $note_message %}"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Run Errored"
+        }
+      ],
+      "Next": "Run Errored"
+    },
+    "Run Errored": {
+      "Type": "Fail",
+      "Error": "RunError",
+      "Cause": "{% $substring(($exists($run_error.Error) ? $string($run_error.Error) : 'unknown error') & ' at ' & $run_error_state & ': ' & ($exists($run_error.Cause) ? $string($run_error.Cause) : $string($run_error)), 0, 30000) %}"
+    }
+  }
+}

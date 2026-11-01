@@ -1,0 +1,1 @@
+{"advisories": 391, "by_severity": {"Critical": 2, "Important": 169, "Moderate": 197, "Low": 23}, "updates_available": true, "pending_security_packages": 141, "pending_packages": 283, "unparsed_lines": 0, "refreshed": true, "scan_s": 36.7, "action": "scan", "host": "serverless-patch-rhel-02", "ts": "2026-10-29T22:02:20+00:00", "duration_ms": 37104}

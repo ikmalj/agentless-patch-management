@@ -1,0 +1,38 @@
+{
+  "execution": "arn:aws:states:ap-southeast-5:588589592508:execution:serverless-patch-cycle:ce6ae405-60b3-4b75-9b06-2d7861b223e6",
+  "status": "FAILED",
+  "error": "HostsFailed",
+  "report": {
+    "run_id": "ce6ae405-60b3-4b75-9b06-2d7861b223e6",
+    "mode": "patch",
+    "percent": 100,
+    "started": "2026-10-30T02:48:50.05Z",
+    "finished": "2026-10-30T03:15:44.795Z",
+    "duration_s": 1614.7,
+    "hosts_total": 1,
+    "patched": 0,
+    "patched_partial": 0,
+    "compliant": 0,
+    "scanned": 0,
+    "skipped": 0,
+    "failed": 1,
+    "results": [
+      {
+        "host": "serverless-patch-win-01",
+        "ip": "10.0.1.189",
+        "instance_id": "i-0b6462c157a7d6763",
+        "platform": "windows",
+        "workload": "iis",
+        "unit": "KB",
+        "status": "failed",
+        "failed_at": "scan_after",
+        "fail_detail": {
+          "Error": "CommandFailed",
+          "Cause": "{\"errorMessage\":\"Exception from HRESULT: 0x8024001E (0x8024001E)\",\"errorType\":\"CommandFailed\",\"requestId\":\"3f8d42d3-f79f-4abe-b881-023d5d1693f4\",\"stackTrace\":[\"  File \\\"/var/task/patch_windows.py\\\", line 527, in lambda_handler\\n    result = ACTIONS[action](_session(host[\\\"ip\\\"]), event)\\n\",\"  File \\\"/var/task/patch_windows.py\\\", line 397, in act_scan\\n    found, defender, method = _search(sess)\\n\",\"  File \\\"/var/task/patch_windows.py\\\", line 350, in _search\\n    d = _ps(sess, SCAN_PS)\\n\",\"  File \\\"/var/task/patch_windows.py\\\", line 143, in _ps\\n    raise CommandFailed(f\\\"{data['__error']} ({data.get('__hresult')})\\\")\\n\"]}"
+        },
+        "advisories_before": 4,
+        "duration_s": 1614.5
+      }
+    ]
+  }
+}

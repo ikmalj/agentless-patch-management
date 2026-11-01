@@ -1,0 +1,11 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "StartPatchCycle",
+      "Effect": "Allow",
+      "Action": "states:StartExecution",
+      "Resource": "arn:aws:states:ap-southeast-5:588589592508:stateMachine:serverless-patch-cycle"
+    }
+  ]
+}

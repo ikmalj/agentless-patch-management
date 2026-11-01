@@ -1,0 +1,23 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "WriteOwnLogs",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": "arn:aws:logs:ap-southeast-5:588589592508:log-group:/aws/lambda/serverless-patch-summary-widget:*"
+    },
+    {
+      "Sid": "QueryMetricsRecordsOnly",
+      "Effect": "Allow",
+      "Action": "logs:StartQuery",
+      "Resource": "arn:aws:logs:ap-southeast-5:588589592508:log-group:/aws/lambda/serverless-patch-metrics"
+    },
+    {
+      "Sid": "ReadQueryResults",
+      "Effect": "Allow",
+      "Action": ["logs:GetQueryResults", "logs:StopQuery"],
+      "Resource": "*"
+    }
+  ]
+}

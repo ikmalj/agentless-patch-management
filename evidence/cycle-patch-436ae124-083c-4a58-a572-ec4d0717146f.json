@@ -1,0 +1,38 @@
+{
+  "execution": "arn:aws:states:ap-southeast-5:588589592508:execution:serverless-patch-cycle:436ae124-083c-4a58-a572-ec4d0717146f",
+  "status": "FAILED",
+  "error": "HostsFailed",
+  "report": {
+    "run_id": "436ae124-083c-4a58-a572-ec4d0717146f",
+    "mode": "patch",
+    "percent": 100,
+    "started": "2026-10-27T22:22:34.044Z",
+    "finished": "2026-10-27T22:22:44.531Z",
+    "duration_s": 10.5,
+    "hosts_total": 1,
+    "patched": 0,
+    "patched_partial": 0,
+    "compliant": 0,
+    "scanned": 0,
+    "skipped": 0,
+    "failed": 1,
+    "results": [
+      {
+        "host": "serverless-patch-win-01",
+        "ip": "10.0.1.189",
+        "instance_id": "i-0b6462c157a7d6763",
+        "platform": "windows",
+        "workload": "iis",
+        "unit": "KB",
+        "status": "failed",
+        "failed_at": "install_start",
+        "fail_detail": {
+          "Error": "CommandFailed",
+          "Cause": "{\"errorMessage\":\"no JSON output (exit 1): The command line is too long.\\r\\n\",\"errorType\":\"CommandFailed\",\"requestId\":\"d2dc9c5a-1622-434f-b0a1-7163b25ff501\",\"stackTrace\":[\"  File \\\"/var/task/patch_windows.py\\\", line 496, in lambda_handler\\n    result = ACTIONS[action](_session(host[\\\"ip\\\"]), event)\\n\",\"  File \\\"/var/task/patch_windows.py\\\", line 406, in act_install_start\\n    _start_worker(sess, rid, \\\"install\\\", percent=int(percent) if percent == int(percent) else percent,\\n\",\"  File \\\"/var/task/patch_windows.py\\\", line 259, in _start_worker\\n    return _ps(sess, body)\\n\",\"  File \\\"/var/task/patch_windows.py\\\", line 131, in _ps\\n    raise CommandFailed(f\\\"no JSON output (exit {r.status_code}): {err[-400:]}\\\")\\n\"]}"
+        },
+        "advisories_before": 4,
+        "duration_s": 10.3
+      }
+    ]
+  }
+}

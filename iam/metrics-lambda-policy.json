@@ -1,0 +1,17 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "WriteOwnLogs",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": "arn:aws:logs:ap-southeast-5:588589592508:log-group:/aws/lambda/serverless-patch-metrics:*"
+    },
+    {
+      "Sid": "ReadCycleHistoryForCostEstimate",
+      "Effect": "Allow",
+      "Action": "states:GetExecutionHistory",
+      "Resource": "arn:aws:states:ap-southeast-5:588589592508:execution:serverless-patch-cycle:*"
+    }
+  ]
+}

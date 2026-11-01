@@ -1,0 +1,11 @@
+{
+  "restored_at": "2026-10-27T07:46:33",
+  "tasks": {
+    "rhel-01": "replacevol-0f4f237fc33509ca0",
+    "rhel-02": "replacevol-0b2277feb6bb9aaca"
+  },
+  "result": {
+    "rhel-01": "succeeded",
+    "rhel-02": "succeeded"
+  }
+}

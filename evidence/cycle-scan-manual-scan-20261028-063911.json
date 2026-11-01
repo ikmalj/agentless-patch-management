@@ -1,0 +1,57 @@
+{
+  "execution": "arn:aws:states:ap-southeast-5:588589592508:execution:serverless-patch-cycle:manual-scan-20261028-063911",
+  "status": "SUCCEEDED",
+  "error": null,
+  "report": {
+    "run_id": "manual-scan-20261028-063911",
+    "mode": "scan",
+    "percent": 100,
+    "started": "2026-10-27T22:39:12.984Z",
+    "finished": "2026-10-27T22:39:22.155Z",
+    "duration_s": 9.2,
+    "hosts_total": 1,
+    "patched": 0,
+    "patched_partial": 0,
+    "compliant": 0,
+    "scanned": 1,
+    "skipped": 0,
+    "failed": 0,
+    "results": [
+      {
+        "host": "serverless-patch-win-01",
+        "ip": "10.0.1.189",
+        "instance_id": "i-0b6462c157a7d6763",
+        "platform": "windows",
+        "workload": "iis",
+        "unit": "KB",
+        "status": "scanned",
+        "advisories_before": 4,
+        "by_severity_before": {
+          "Critical": 0,
+          "Important": 2,
+          "Moderate": 0,
+          "Low": 0,
+          "Unspecified": 2
+        },
+        "pending_security_packages_before": 4,
+        "pending_packages_before": 5,
+        "kernel": "10.0.20348.5499",
+        "agent_present": false,
+        "healthy": true,
+        "health_detail": "http 200",
+        "update_ids": [
+          "KB890830",
+          "KB5131594",
+          "KB5128928",
+          "KB5126655"
+        ],
+        "defender_excluded": [
+          "KB2267602"
+        ],
+        "scan_method": "winrm",
+        "scan_s": 6,
+        "duration_s": 9
+      }
+    ]
+  }
+}
