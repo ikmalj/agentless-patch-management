@@ -30,7 +30,7 @@ $DashboardUrl     = "https://$Region.console.aws.amazon.com/cloudwatch/home?regi
 $Hosts = [ordered]@{
     'rhel-01' = @{ Id = 'i-0ba983a12665d852f'; Ip = '10.0.1.175'; Ami = 'ami-0bf7b60a5f0dc4edc'; Name = 'serverless-patch-rhel-01'; Workload = 'nginx' }
     'rhel-02' = @{ Id = 'i-008641b7be92f9871'; Ip = '10.0.1.254'; Ami = 'ami-0f57a82478bedfd3b'; Name = 'serverless-patch-rhel-02'; Workload = 'mysql' }
-    'win-01'  = @{ Id = 'i-0b6462c157a7d6763'; Ip = '10.0.1.189'; Ami = 'ami-0abace92bb7d7d52f'; Name = 'serverless-patch-win-01';  Workload = 'iis' }
+    'win-01'  = @{ Id = 'i-0b6462c157a7d6763'; Ip = '10.0.1.189'; Ami = 'ami-01b25632c46bf40fb'; Name = 'serverless-patch-win-01';  Workload = 'iis' }
 }
 
 $EvidenceDir = Join-Path $PSScriptRoot 'evidence'
