@@ -39,6 +39,10 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 SECRET_ID = os.environ["SECRET_ID"]
 MIN_DISK_FREE_MB = int(os.environ.get("MIN_DISK_FREE_MB", "5120"))
+# Follow-up passes wait until Windows servicing has settled after the cumulative-update reboot.
+# Found 1 Nov 2026: a WinRE update (KB5131594) installed ~4 min after that reboot reported Succeeded
+# but was still offered; the same update installed 1-5 h later took effect every time.
+SETTLE_MIN_UPTIME_S = int(os.environ.get("SETTLE_MIN_UPTIME_S", "900"))
 DATA_DIR = r"C:\ProgramData\serverless-patch"
 TASK_PATH = "\\serverless-patch\\"
 DEFENDER_KBS = ("KB2267602", "KB4052623")          # definitions, platform
@@ -78,6 +82,11 @@ class UpdateServiceBusy(Exception):
 # the rescan right after the post-CU reboot). 0x800706BA / 0x800706BE: the RPC server behind the
 # COM object went away mid-call, which happens when wuauserv restarts.
 TRANSIENT_WU = ("0x8024001E", "0x800706BA", "0x800706BE")
+
+
+class ServicingBusy(Exception):
+    """Windows servicing has not settled yet (recent boot, TrustedInstaller/TiWorker active or
+    operations pending). Step Functions waits and asks again before a follow-up pass."""
 
 
 class CommandFailed(Exception):
@@ -203,6 +212,23 @@ HEALTH_OUT_PS = HEALTH_PS + r"""
   build = "$($os.Version).$ubr"; boot_id = $os.LastBootUpTime.ToUniversalTime().ToString('o')
   uptime_s = [int]((Get-Date) - $os.LastBootUpTime).TotalSeconds
   w3svc = [string]$w3.Status; http = $code; app_ok = $ok; reboot_pending = $pend
+} | ConvertTo-Json -Compress
+"""
+
+SERVICING_PS = r"""
+$os = Get-CimInstance Win32_OperatingSystem
+$ti = Get-Service TrustedInstaller -ErrorAction SilentlyContinue
+$tiw = @(Get-Process TiWorker -ErrorAction SilentlyContinue).Count
+$cbs = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing'
+[ordered]@{
+  boot_id = $os.LastBootUpTime.ToUniversalTime().ToString('o')
+  uptime_s = [int]((Get-Date) - $os.LastBootUpTime).TotalSeconds
+  trustedinstaller = [string]$ti.Status
+  tiworker = $tiw
+  cbs_reboot_pending = (Test-Path "$cbs\RebootPending")
+  cbs_packages_pending = (Test-Path "$cbs\PackagesPending")
+  pending_xml = (Test-Path "$env:windir\WinSxS\pending.xml")
+  wu_reboot_required = (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired')
 } | ConvertTo-Json -Compress
 """
 
@@ -446,7 +472,11 @@ def act_install_start(sess, ev):
                 "selected": len(sel) or None, "selected_ids": sel}
 
     selected, total = [], None
-    if percent < 100:
+    kbs = ev.get("kbs") or []
+    kbs = [k for k in ([kbs] if isinstance(kbs, str) else kbs) if isinstance(k, str) and re.fullmatch(r"KB\d+", k)]
+    if kbs:   # follow-up pass: only the selected updates that the rescan still found
+        selected = sorted(set(kbs))
+    elif percent < 100:
         found, _, _ = _search(sess, rid_hint=f"sel-{rid}")
         countable, _ = _summarise(found)
         total = len(countable)
@@ -457,7 +487,8 @@ def act_install_start(sess, ev):
     return {"state": "started", "unit": TASK_PATH + "run-" + rid,
             "log": f"{DATA_DIR}\\{rid}.log", "command": "Windows Update API (Microsoft.Update.Session) as SYSTEM",
             "percent": percent, "advisories_total": total,
-            "selected": len(selected) if percent < 100 else None, "selected_ids": selected}
+            "selected": len(selected) if (percent < 100 or kbs) else None, "selected_ids": selected,
+            "followup": bool(kbs)}
 
 
 def act_install_status(sess, ev):
@@ -526,6 +557,24 @@ def act_health(sess, ev):
             "rebooted": bool(before), "reboot_pending": d.get("reboot_pending"), **h}
 
 
+def act_servicing(sess, ev):
+    """Read-only: has Windows servicing settled enough for a follow-up install pass?"""
+    d = _ps(sess, SERVICING_PS)
+    min_up = int(ev.get("min_uptime_s") or SETTLE_MIN_UPTIME_S)
+    waiting = []
+    if (d.get("uptime_s") or 0) < min_up:
+        waiting.append(f"uptime {d.get('uptime_s')} s < {min_up} s")
+    if d.get("trustedinstaller") == "Running" or (d.get("tiworker") or 0) > 0:
+        waiting.append(f"Windows Modules Installer busy (TrustedInstaller {d.get('trustedinstaller')}, TiWorker {d.get('tiworker')})")
+    if d.get("cbs_reboot_pending") or d.get("cbs_packages_pending") or d.get("pending_xml"):
+        waiting.append("component servicing operations pending")
+    out = {"settled": not waiting, "waiting_for": waiting, **d}
+    if waiting and ev.get("raise_if_busy", True):
+        print(json.dumps(out))
+        raise ServicingBusy("; ".join(waiting))
+    return out
+
+
 ACTIONS = {
     "precheck": act_precheck,
     "scan": act_scan,
@@ -533,6 +582,7 @@ ACTIONS = {
     "install_status": act_install_status,
     "reboot": act_reboot,
     "health": act_health,
+    "servicing": act_servicing,
 }
 
 

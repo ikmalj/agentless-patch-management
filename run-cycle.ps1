@@ -19,6 +19,7 @@
   .\run-cycle.ps1 -Mode patch -Targets serverless-patch-rhel-01 -NoReboot
   .\run-cycle.ps1 -Mode patch -Percent 5           # only 5% of missing RHSA, Critical first
   .\run-cycle.ps1 -Notify                           # scan only, but also email the result (Phase D test)
+  .\run-cycle.ps1 -Mode patch -Followups 0          # Windows: no follow-up pass (iteration 2 behaviour)
 
   Email (SNS): patch runs send one by default, scan runs do not. -Notify forces one, -NoNotify suppresses it.
   A run that stops on an unexpected error always sends one.
@@ -31,6 +32,8 @@ param(
     [switch]$ViaSchedule,
     [switch]$Notify,
     [switch]$NoNotify,
+    [ValidateRange(0, 3)][int]$Followups = 2,
+    [ValidateRange(1, 60)][int]$FollowupWaitMinutes = 10,
     [int]$DelayMinutes = 2,
     [int]$PollSeconds = 30
 )
@@ -108,6 +111,7 @@ try {
         if ($winHosts) {
             if ($Percent -lt 100) { Write-Note "Windows: install $Percent% of the missing updates (highest severity first, Defender excluded) on: $($winHosts -join ', ')" }
             else { Write-Note "Windows: install all missing updates except Defender (Windows Update API as SYSTEM) on: $($winHosts -join ', ')" }
+            if ($Followups -gt 0) { Write-Note "Windows: up to $Followups follow-up pass(es) if the rescan still finds selected updates (after servicing settles; adds ~$FollowupWaitMinutes-$(3 * $FollowupWaitMinutes + 15) min)" }
         }
         Write-Note ("Reboot if required: " + $(if ($NoReboot) { 'no' } else { 'yes' }))
         Write-Note 'The hosts will no longer match their baseline AMIs afterwards (restore-baseline.ps1 resets them).'
@@ -118,6 +122,10 @@ try {
     if ($Targets) { $runInput.targets = $Targets }
     if ($Notify)   { $runInput.notify = $true }
     if ($NoNotify) { $runInput.notify = $false }
+    # Windows: updates still offered after the rescan get up to $Followups more passes in the same
+    # cycle, after Windows servicing settles (pass 2 waits $FollowupWaitMinutes min, pass 3 twice that).
+    $runInput.followups = $Followups
+    $runInput.followup_wait_s = $FollowupWaitMinutes * 60
     $inputJson = $runInput | ConvertTo-Json -Compress
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 
@@ -184,6 +192,8 @@ try {
                 After     = $_.advisories_after
                 Selected  = $_.advisories_selected
                 SelLeft   = $_.selected_remaining
+                Passes    = if ($_.install_passes) { @($_.install_passes).Count } elseif ($_.status -like 'patched*') { 1 } else { $null }
+                FirstLeft = $_.first_pass_remaining
                 SecPkgs   = $_.pending_security_packages_before
                 Upgraded  = $_.packages_upgraded
                 Rebooted  = $_.rebooted
@@ -191,7 +201,7 @@ try {
                 Secs      = $_.duration_s
                 FailedAt  = $_.failed_at
             }
-        } | Format-Table Host, Status, Unit, Before, After, Selected, SelLeft, SecPkgs, Upgraded, Rebooted, Healthy, Secs, FailedAt -AutoSize |
+        } | Format-Table Host, Status, Unit, Before, After, Selected, SelLeft, Passes, FirstLeft, Upgraded, Rebooted, Healthy, Secs, FailedAt -AutoSize |
             Out-String -Width 240 | Write-Host
     } else {
         Write-Note "$($d.error): $($d.cause)"

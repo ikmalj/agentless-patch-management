@@ -228,7 +228,9 @@ def view_hosts(s):
         else:
             body = (f'<div class="big">{esc(r.get("before"))} &rarr; {esc(r.get("after"))}<span class="u">{esc(unit)}</span></div>'
                     f'<div class="meta">verified {esc(r.get("succeeded"))} / {esc(r.get("attempted"))}'
-                    + (f' &middot; {esc(r.get("percent"))}% scope' if num(r.get("percent"), 100) < 100 else "") + "</div>")
+                    + (f' &middot; {esc(r.get("percent"))}% scope' if num(r.get("percent"), 100) < 100 else "")
+                    + (f' &middot; {int(num(r.get("passes")))} passes (first pass {esc(r.get("first_pass_succeeded"))}/{esc(r.get("attempted"))})'
+                       if num(r.get("passes")) > 1 else "") + "</div>")
         chips = []
         if r.get("rebooted") is not None:
             chips.append("rebooted" if r.get("rebooted") else "no reboot")

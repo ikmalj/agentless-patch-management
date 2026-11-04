@@ -110,8 +110,12 @@ dashboard opens, allow its custom widgets ("Allow always").
 | Back to baseline | `.\restore-baseline.ps1 -Target rhel-01,rhel-02,win-01` | **Yes** (type `RESTORE`) |
 | Shut down | `.\lab.ps1 stop-all`, `.\lab.ps1 endpoint-down` | No |
 
-Windows usually needs a second pass: the Windows Recovery Environment update (KB5131594) is often still
-offered after the first pass. Run the one-host patch command for win-01 again.
+Windows follow-up passes (iteration 3): the Windows Recovery Environment update (KB5131594) is often still
+offered after the first pass, because it only takes effect once Windows has finished servicing the cumulative
+update. The cycle therefore reinstalls any selected update the rescan still finds, up to `-Followups` times
+(default 2), each after a wait (`-FollowupWaitMinutes`, default 10) and a read-only check that servicing has
+settled (uptime at least 15 min, Windows Modules Installer idle, nothing pending). `-Followups 0` restores
+the iteration 2 behaviour.
 
 ## Demonstration and Evaluation
 
@@ -136,12 +140,18 @@ Each repetition starts from baseline, so every run patches the same set of missi
 ```powershell
 .\lab.ps1 endpoint-up ; .\lab.ps1 start-all
 .\restore-baseline.ps1 -Target rhel-01,rhel-02,win-01                 # type RESTORE, then wait ~4 min
-.\run-cycle.ps1 -Mode patch -ViaSchedule                              # all three hosts, type PATCH
-.\run-cycle.ps1 -Mode patch -Targets serverless-patch-win-01          # Windows second pass, only if win-01 is PARTIAL
+.\run-cycle.ps1 -Mode patch -ViaSchedule                              # all three hosts, follow-ups included, type PATCH
 ```
 
-Repeat three times. Report deployment time as the full-cycle `duration_s` per host (the second pass is
-reported separately), and success rate both by attempt and as "updates compliant after N passes".
+Repeat three times with the iteration 3 workflow, and count only those runs for the final figures.
+Earlier runs (iterations 1 and 2) are reported as iteration history, not mixed into the final figures.
+
+- **Deployment time (Experiment 1):** `duration_s` per host, from the start of the host's branch to its
+  final verified rescan, follow-up passes and waits included. Report the first-pass time separately from
+  `install_passes[0].at`.
+- **Success rate (Experiment 2):** `succeeded / attempted` per cycle, where succeeded means confirmed fixed
+  by the final rescan of that cycle. Report the first-pass figure (`first_pass_succeeded / attempted`) and
+  the number of passes next to it.
 
 ### Experiment 3: Scalability
 
@@ -174,12 +184,13 @@ experiment window, run a query and choose **Export results > Download table (CSV
 ```
 # Experiments 1 and 2: One Row per Host per Patch Run
 filter record = 'host' and mode = 'patch'
-| fields @timestamp, run_id, host, platform, unit, status, before, after, attempted, succeeded, duration_s, rebooted, healthy
+| fields @timestamp, run_id, host, platform, unit, status, before, after, attempted, succeeded, first_pass_succeeded, passes, duration_s, rebooted, healthy
 | sort @timestamp asc
 
 # Experiment 2: Success Rate per Platform
 filter record = 'host' and mode = 'patch' and attempted > 0
-| stats sum(succeeded) as verified, sum(attempted) as tried, 100 * sum(succeeded) / sum(attempted) as success_pct by platform
+| stats sum(succeeded) as verified, sum(attempted) as tried, 100 * sum(succeeded) / sum(attempted) as success_pct,
+        100 * sum(first_pass_succeeded) / sum(attempted) as first_pass_pct, avg(passes) as avg_passes by platform
 
 # Experiment 3: Cycle Time by Number of RHEL Hosts (also saved as evidence\exp3-rhel-summary-*.csv)
 filter record = 'host' and mode = 'patch' and percent = 100 and platform = 'rhel' and status like /^patched/

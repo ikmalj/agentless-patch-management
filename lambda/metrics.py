@@ -218,6 +218,18 @@ def host_records(report, ts_ms):
             "build_before": r.get("kernel_before") or r.get("kernel"),
             "build_after": r.get("kernel_after"),
         }
+        # Iteration 3: Windows may need follow-up passes inside the cycle. Keep the first-pass
+        # result too, so the report can show both "after the cycle" and "after the first pass".
+        if r.get("install_passes"):
+            first_left = _num(r.get("first_pass_remaining"))
+            rec["passes"] = len(r["install_passes"])
+            rec["followup_passes"] = _num(r.get("followup_passes"))
+            rec["first_pass_succeeded"] = max(0, attempted - first_left)
+            rec["followup_error"] = (r.get("followup_error") or {}).get("at") or ""
+        elif r.get("status") in PATCHED_STATES:
+            rec["passes"] = 1
+            rec["followup_passes"] = 0
+            rec["first_pass_succeeded"] = succeeded
         # Updates closed per severity (missing before minus missing after the verified rescan).
         # Log fields only (no custom metrics), used by the "Fixed by severity" dashboard widget.
         if r.get("status") in PATCHED_STATES:
@@ -314,13 +326,30 @@ def host_lines(r, h):
                       (f" ({r.get('health_detail')})" if r.get("health_detail") else ""))
         detail.append(_dur(h["duration_s"]))
         lines.append("  " + ", ".join(detail))
+        passes = r.get("install_passes") or []
+        if len(passes) > 1:
+            steps = []
+            for p in passes:
+                settle = p.get("settle") or {}
+                note = ""
+                if p.get("pass", 1) > 1:
+                    note = " after Windows servicing settled" if settle.get("settled") else " (servicing still busy, installed anyway)"
+                steps.append(f"pass {p.get('pass')}: {len(p.get('kbs') or [])} {unit}{note}, {p.get('remaining_after')} still offered")
+            lines.append(f"  Installed in {len(passes)} passes within this cycle (first pass verified "
+                         f"{h.get('first_pass_succeeded', 0)}/{h['attempted']}): " + "; ".join(steps))
+        if r.get("followup_error"):
+            fe = r["followup_error"]
+            lines.append(f"  Follow-up pass stopped at {fe.get('at')}: {_reason(fe.get('detail'))}. "
+                         "Result shown is the last verified rescan.")
         if h["build_before"] and h["build_after"] and h["build_before"] != h["build_after"]:
             lines.append(f"  {'kernel' if unit == 'RHSA' else 'build'} {h['build_before']} -> {h['build_after']}")
         if status == "patched_partial":
             sev = r.get("by_severity_after") or {}
             left = ", ".join(f"{k} {v}" for k, v in sev.items() if v)
             lines.append(f"  Still offered after the post-install rescan: {h['after']} {unit}"
-                         + (f" ({left})" if left else "") + ". Run the cycle again to apply.")
+                         + (f" ({left})" if left else "")
+                         + (". Run the cycle again to apply." if not r.get("install_passes") or len(r["install_passes"]) <= 1
+                            else f" after {len(r['install_passes'])} passes. Run the cycle again later to apply."))
         bad = [u for u in r.get("update_results") or [] if u.get("result") not in ("Succeeded", None)]
         for u in bad:
             lines.append(f"  {u.get('kb')}: {u.get('result')} {u.get('hresult', '')}".rstrip())

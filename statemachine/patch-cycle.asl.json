@@ -1,5 +1,5 @@
 {
-  "Comment": "serverless-patch-cycle: agentless patch orchestration. RHEL: security advisories via dnf upgrade --security over SSH. Windows: countable updates (Defender excluded) via a one-shot SYSTEM scheduled task over WinRM. Phase D: per-cycle EMF metrics (serverless-patch-metrics) and SNS notification (serverless-patch-notify).",
+  "Comment": "serverless-patch-cycle: agentless patch orchestration. RHEL: security advisories via dnf upgrade --security over SSH. Windows: countable updates (Defender excluded) via a one-shot SYSTEM scheduled task over WinRM. Phase D: per-cycle EMF metrics (serverless-patch-metrics) and SNS notification (serverless-patch-notify). Iteration 3: Windows updates still offered after the post-install rescan get up to two follow-up passes inside the same cycle, each after Windows servicing has settled.",
   "QueryLanguage": "JSONata",
   "StartAt": "Init Run",
   "States": {
@@ -12,7 +12,9 @@
         "exec_reboot": "{% $states.input.reboot = false ? false : true %}",
         "exec_targets": "{% $exists($states.input.targets) ? $states.input.targets : [] %}",
         "exec_percent": "{% $exists($states.input.percent) ? $states.input.percent : 100 %}",
-        "exec_notify": "{% $exists($states.input.notify) ? ($states.input.notify = true) : (($exists($states.input.mode) ? $states.input.mode : 'scan') = 'patch') %}"
+        "exec_notify": "{% $exists($states.input.notify) ? ($states.input.notify = true) : (($exists($states.input.mode) ? $states.input.mode : 'scan') = 'patch') %}",
+        "exec_followups": "{% $exists($states.input.followups) ? $states.input.followups : 2 %}",
+        "exec_followup_wait": "{% $exists($states.input.followup_wait_s) ? $states.input.followup_wait_s : 600 %}"
       },
       "Next": "Is Mode Valid"
     },
@@ -20,7 +22,7 @@
       "Type": "Choice",
       "Choices": [
         {
-          "Condition": "{% $exec_mode in ['scan', 'patch'] and $type($exec_percent) = 'number' and $exec_percent > 0 and $exec_percent <= 100 %}",
+          "Condition": "{% $exec_mode in ['scan', 'patch'] and $type($exec_percent) = 'number' and $exec_percent > 0 and $exec_percent <= 100 and $type($exec_followups) = 'number' and $exec_followups >= 0 and $exec_followups <= 3 and $type($exec_followup_wait) = 'number' and $exec_followup_wait >= 60 and $exec_followup_wait <= 3600 %}",
           "Next": "Discover Targets"
         }
       ],
@@ -29,7 +31,7 @@
     "Invalid Mode": {
       "Type": "Fail",
       "Error": "InvalidMode",
-      "Cause": "mode must be scan or patch, and percent a number from 1 to 100"
+      "Cause": "mode must be scan or patch, percent a number from 1 to 100, followups 0-3, followup_wait_s 60-3600"
     },
     "Discover Targets": {
       "Type": "Task",
@@ -90,7 +92,9 @@
         "run_id": "{% $exec_run_id %}",
         "mode": "{% $exec_mode %}",
         "reboot": "{% $exec_reboot %}",
-        "percent": "{% $exec_percent %}"
+        "percent": "{% $exec_percent %}",
+        "followups": "{% $exec_followups %}",
+        "followup_wait": "{% $exec_followup_wait %}"
       },
       "ItemProcessor": {
         "ProcessorConfig": {
@@ -116,7 +120,14 @@
               "scan_after": {},
               "polls": 0,
               "failed_at": "",
-              "fail_detail": {}
+              "fail_detail": {},
+              "max_followups": "{% $states.input.followups %}",
+              "fu_wait": "{% $states.input.followup_wait %}",
+              "followups": 0,
+              "passes": [],
+              "settle": {},
+              "win_rid": "",
+              "followup_error": null
             },
             "Next": "Which Platform"
           },
@@ -163,7 +174,7 @@
               "failed_at": "install",
               "fail_detail": "{% {'reason': 'install still running after ' & $string($polls) & ' polls'} %}"
             },
-            "Next": "Host Failed"
+            "Next": "Route Failure"
           },
           "Install Failed": {
             "Type": "Pass",
@@ -171,11 +182,11 @@
               "failed_at": "install",
               "fail_detail": "{% $install %}"
             },
-            "Next": "Host Failed"
+            "Next": "Route Failure"
           },
           "Host Patched": {
             "Type": "Pass",
-            "Output": "{% {'host': $h.name, 'ip': $h.ip, 'instance_id': $h.instance_id, 'platform': $h.platform, 'workload': $h.workload, 'unit': $h.platform = 'windows' ? 'KB' : 'RHSA', 'status': ($pct < 100 ? $scan_after.checked_remaining = 0 : $scan_after.advisories = 0) ? 'patched' : 'patched_partial', 'scope_percent': $pct, 'advisories_selected': $pct < 100 ? $count($selected) : $scan_before.advisories, 'selected_remaining': $pct < 100 ? $scan_after.checked_remaining : $scan_after.advisories, 'advisories_before': $scan_before.advisories, 'advisories_after': $scan_after.advisories, 'advisories_applied': $scan_before.advisories - $scan_after.advisories, 'by_severity_before': $scan_before.by_severity, 'by_severity_after': $scan_after.by_severity, 'pending_security_packages_before': $scan_before.pending_security_packages, 'pending_security_packages_after': $scan_after.pending_security_packages, 'pending_packages_before': $scan_before.pending_packages, 'pending_packages_after': $scan_after.pending_packages, 'packages_upgraded': $install.packages_upgraded, 'packages_installed': $install.packages_installed, 'packages_removed': $install.packages_removed, 'updates_failed': $install.updates_failed, 'update_results': $install.update_results, 'reboot_required': $install.reboot_required, 'rebooted': $post.rebooted, 'reboot_reason': $install.reboot_reason, 'kernel_before': $pre.kernel, 'kernel_after': $post.kernel, 'healthy_after': $post.healthy, 'health_detail': $post.detail, 'defender_excluded': $scan_before.defender_excluded, 'install_polls': $polls, 'install_log': $install.log, 'duration_s': $round(($toMillis($states.context.State.EnteredTime) - $toMillis($t0)) / 1000, 1)} %}",
+            "Output": "{% {'host': $h.name, 'ip': $h.ip, 'instance_id': $h.instance_id, 'platform': $h.platform, 'workload': $h.workload, 'unit': $h.platform = 'windows' ? 'KB' : 'RHSA', 'status': ($pct < 100 ? $scan_after.checked_remaining = 0 : $scan_after.advisories = 0) ? 'patched' : 'patched_partial', 'scope_percent': $pct, 'advisories_selected': $pct < 100 ? $count($selected) : $scan_before.advisories, 'selected_remaining': $pct < 100 ? $scan_after.checked_remaining : $scan_after.advisories, 'advisories_before': $scan_before.advisories, 'advisories_after': $scan_after.advisories, 'advisories_applied': $scan_before.advisories - $scan_after.advisories, 'by_severity_before': $scan_before.by_severity, 'by_severity_after': $scan_after.by_severity, 'pending_security_packages_before': $scan_before.pending_security_packages, 'pending_security_packages_after': $scan_after.pending_security_packages, 'pending_packages_before': $scan_before.pending_packages, 'pending_packages_after': $scan_after.pending_packages, 'packages_upgraded': $count($passes) > 0 ? $passes[0].upgraded : $install.packages_upgraded, 'packages_installed': $install.packages_installed, 'packages_removed': $install.packages_removed, 'updates_failed': $install.updates_failed, 'update_results': $count($passes) > 0 ? $passes[0].update_results : $install.update_results, 'reboot_required': $install.reboot_required, 'rebooted': $post.rebooted, 'reboot_reason': $install.reboot_reason, 'kernel_before': $pre.kernel, 'kernel_after': $post.kernel, 'healthy_after': $post.healthy, 'health_detail': $post.detail, 'defender_excluded': $scan_before.defender_excluded, 'install_polls': $polls, 'followup_passes': $followups, 'first_pass_remaining': $count($passes) > 0 ? $passes[0].remaining_after : null, 'install_passes': $passes, 'followup_error': $followup_error, 'install_log': $install.log, 'duration_s': $round(($toMillis($states.context.State.EnteredTime) - $toMillis($t0)) / 1000, 1)} %}",
             "End": true
           },
           "Host Failed": {
@@ -756,7 +767,8 @@
             ],
             "Assign": {
               "install": "{% $states.result.Payload %}",
-              "selected": "{% $states.result.Payload.selected_ids ? $states.result.Payload.selected_ids : [] %}"
+              "selected": "{% $states.result.Payload.selected_ids ? $states.result.Payload.selected_ids : [] %}",
+              "win_rid": "{% $run_id %}"
             },
             "Next": "WIN Wait For Install"
           },
@@ -770,7 +782,7 @@
             "Resource": "arn:aws:states:::lambda:invoke",
             "Arguments": {
               "FunctionName": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-windows",
-              "Payload": "{% {'action': 'install_status', 'host': $h, 'run_id': $run_id} %}"
+              "Payload": "{% {'action': 'install_status', 'host': $h, 'run_id': $win_rid} %}"
             },
             "TimeoutSeconds": 930,
             "Retry": [
@@ -819,13 +831,13 @@
                   "failed_at": "install_status",
                   "fail_detail": "{% $states.errorOutput %}"
                 },
-                "Next": "Host Failed"
+                "Next": "Route Failure"
               }
             ],
             "Assign": {
               "install": "{% $states.result.Payload %}",
               "polls": "{% $polls + 1 %}",
-              "selected": "{% $states.result.Payload.selected_ids ? $states.result.Payload.selected_ids : $selected %}"
+              "selected": "{% ($followups = 0 and $count($states.result.Payload.selected_ids) > 0) ? $states.result.Payload.selected_ids : $selected %}"
             },
             "Next": "WIN Is Install Done"
           },
@@ -856,7 +868,7 @@
             "Resource": "arn:aws:states:::lambda:invoke",
             "Arguments": {
               "FunctionName": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-windows",
-              "Payload": "{% {'action': 'reboot', 'host': $h, 'run_id': $run_id} %}"
+              "Payload": "{% {'action': 'reboot', 'host': $h, 'run_id': $win_rid} %}"
             },
             "TimeoutSeconds": 930,
             "Retry": [
@@ -1003,11 +1015,170 @@
                   "failed_at": "scan_after",
                   "fail_detail": "{% $states.errorOutput %}"
                 },
-                "Next": "Host Failed"
+                "Next": "Route Failure"
               }
             ],
             "Assign": {
-              "scan_after": "{% $states.result.Payload %}"
+              "scan_after": "{% $states.result.Payload %}",
+              "passes": "{% $append($passes, [{'pass': $count($passes) + 1, 'run_id': $win_rid, 'kbs': $install.selected_ids, 'upgraded': $install.packages_upgraded, 'update_results': $install.update_results, 'reboot_required': $install.reboot_required, 'remaining_after': $count($states.result.Payload.checked_remaining_ids), 'remaining_ids': $states.result.Payload.checked_remaining_ids, 'settle': $followups > 0 ? $settle : null, 'at': $states.context.State.EnteredTime}]) %}"
+            },
+            "Next": "WIN Needs Followup"
+          },
+          "WIN Needs Followup": {
+            "Type": "Choice",
+            "Comment": "A selected update still offered after a verified install gets another pass, at most max_followups.",
+            "Choices": [
+              {
+                "Condition": "{% $mode = 'patch' and $followups < $max_followups and $count($scan_after.checked_remaining_ids) > 0 %}",
+                "Next": "WIN Followup Wait"
+              }
+            ],
+            "Default": "Host Patched"
+          },
+          "WIN Followup Wait": {
+            "Type": "Wait",
+            "Comment": "Pass 2 waits fu_wait, pass 3 twice that, then the servicing check decides.",
+            "Seconds": "{% $fu_wait * ($followups + 1) %}",
+            "Next": "WIN Settle Check"
+          },
+          "WIN Settle Check": {
+            "Type": "Task",
+            "Comment": "Read-only. Waits until uptime >= 15 min, the Windows Modules Installer is idle and nothing is pending.",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+              "FunctionName": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-windows",
+              "Payload": "{% {'action': 'servicing', 'host': $h} %}"
+            },
+            "TimeoutSeconds": 930,
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              },
+              {
+                "ErrorEquals": [
+                  "HostUnreachable"
+                ],
+                "IntervalSeconds": 30,
+                "MaxAttempts": 10,
+                "BackoffRate": 1
+              },
+              {
+                "ErrorEquals": [
+                  "ServicingBusy"
+                ],
+                "IntervalSeconds": 60,
+                "MaxAttempts": 60,
+                "BackoffRate": 1
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "ServicingBusy"
+                ],
+                "Assign": {
+                  "settle": "{% {'settled': false, 'note': 'still busy after 60 checks, installed anyway', 'detail': $states.errorOutput.Cause} %}"
+                },
+                "Next": "WIN Followup Install"
+              },
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Assign": {
+                  "failed_at": "settle_check",
+                  "fail_detail": "{% $states.errorOutput %}"
+                },
+                "Next": "Route Failure"
+              }
+            ],
+            "Assign": {
+              "settle": "{% $states.result.Payload %}"
+            },
+            "Next": "WIN Followup Install"
+          },
+          "WIN Followup Install": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Arguments": {
+              "FunctionName": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-windows",
+              "Payload": "{% {'action': 'install_start', 'host': $h, 'run_id': $run_id & '-f' & $string($followups + 1), 'percent': $pct, 'kbs': $scan_after.checked_remaining_ids} %}"
+            },
+            "TimeoutSeconds": 930,
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              },
+              {
+                "ErrorEquals": [
+                  "HostUnreachable"
+                ],
+                "IntervalSeconds": 30,
+                "MaxAttempts": 4,
+                "BackoffRate": 1
+              },
+              {
+                "ErrorEquals": [
+                  "UpdateServiceBusy"
+                ],
+                "IntervalSeconds": 60,
+                "MaxAttempts": 10,
+                "BackoffRate": 1
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Assign": {
+                  "failed_at": "followup_install",
+                  "fail_detail": "{% $states.errorOutput %}"
+                },
+                "Next": "Route Failure"
+              }
+            ],
+            "Assign": {
+              "install": "{% $states.result.Payload %}",
+              "win_rid": "{% $run_id & '-f' & $string($followups + 1) %}",
+              "followups": "{% $followups + 1 %}",
+              "polls": 0
+            },
+            "Next": "WIN Wait For Install",
+            "Comment": "Follow-up pass: reinstall only the selected updates the rescan still found."
+          },
+          "Route Failure": {
+            "Type": "Choice",
+            "Comment": "Errors after a verified Windows pass (passes is filled at the rescan) fall back to that rescan.",
+            "Choices": [
+              {
+                "Condition": "{% $count($passes) > 0 %}",
+                "Next": "WIN Followup Failed"
+              }
+            ],
+            "Default": "Host Failed"
+          },
+          "WIN Followup Failed": {
+            "Type": "Pass",
+            "Assign": {
+              "followup_error": "{% {'at': $failed_at, 'detail': $fail_detail} %}",
+              "failed_at": ""
             },
             "Next": "Host Patched"
           }
