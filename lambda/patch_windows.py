@@ -32,7 +32,8 @@ import requests
 import urllib3
 import winrm
 from botocore.config import Config
-from winrm.exceptions import InvalidCredentialsError, WinRMError, WinRMOperationTimeoutError, WinRMTransportError
+from winrm.exceptions import (InvalidCredentialsError, WinRMError, WinRMOperationTimeoutError, WinRMTransportError,
+                              WSManFaultError)
 
 # Lab limitation: the WinRM listener uses a self-signed certificate (verification skipped).
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -155,6 +156,15 @@ def _ps(sess, body):
         # within operation_timeout_sec (seen 31 Oct 2026 right after the post-CU reboot, while Windows was
         # still finishing servicing work). Same handling as an unreachable host: Step Functions waits and retries.
         raise HostUnreachable(f"{type(e).__name__}: {str(e) or 'WinRM operation timed out'}") from None
+    except WSManFaultError as e:
+        # "Access is denied" as an HTTP 500 WSMan fault (0x80070005, w:InternalError) right after a reboot:
+        # WinRM accepts the connection before Windows can create the shell for the account. Seen 7 Nov 2026 on
+        # the post-reboot health check; the same account worked minutes later. A real credential failure is a
+        # 401 (InvalidCredentialsError, above), so this is retried like an unreachable host, within the same
+        # bounded retries (post_health 40 x 30 s).
+        if getattr(e, "code", None) == 500 and getattr(e, "wsman_fault_code", None) == 0x80070005:
+            raise HostUnreachable(f"WinRM not ready (WSManFault access denied, HTTP 500): {e}") from None
+        raise CommandFailed(f"{type(e).__name__}: {e}") from None
     except WinRMError as e:
         raise CommandFailed(f"{type(e).__name__}: {e}") from None
     out = r.std_out.decode("utf-8", errors="replace").strip().splitlines()
