@@ -21,7 +21,7 @@
    "width": 24,
    "height": 3,
    "properties": {
-    "markdown": "## Centralized Agentless Patch Management\n**EventBridge Scheduler \u2192 Step Functions \u2192 Lambda \u2192 SSH (RHEL 9) / WinRM (Windows Server 2022)** \u00b7 no agent on any host \u00b7 region __REGION__\n\n[Open the Step Functions executions](https://__REGION__.console.aws.amazon.com/states/home?region=__REGION__#/statemachines/view/__STATE_MACHINE_ARN__) \u00b7 The **Host** selector changes the *Selected host* row \u00b7 Colours: green from 95%, amber 80-95%, red below 80%",
+    "markdown": "## Centralized Agentless Patch Management\n**EventBridge Scheduler \u2192 Step Functions \u2192 Lambda \u2192 SSH (RHEL 9) / WinRM (Windows Server 2022)** \u00b7 no agent on any host \u00b7 region __REGION__\n\n[Open the Step Functions executions](https://__REGION__.console.aws.amazon.com/states/home?region=__REGION__#/statemachines/view/__STATE_MACHINE_ARN__) \u00b7 The **Host** selector changes the *Selected host* row \u00b7 Colours: green from 90%, amber 80-90%, red below 80%",
     "background": "solid"
    }
   },
@@ -119,9 +119,19 @@
        "color": "#d62728",
        "fill": "below"
       },
+      [
+       {
+        "label": "80-90%",
+        "value": 80,
+        "color": "#ff7f0e"
+       },
+       {
+        "value": 90
+       }
+      ],
       {
-       "label": "Target 95%",
-       "value": 95,
+       "label": "Target 90%",
+       "value": 90,
        "color": "#2ca02c",
        "fill": "above"
       }

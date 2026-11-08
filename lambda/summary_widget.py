@@ -141,7 +141,7 @@ def short(hostname):
 def rate_colour(pct):
     if pct is None:
         return ("#6b7280", "#4b5563")
-    if pct >= 95:
+    if pct >= 90:
         return ("#22c55e", "#15803d")
     if pct >= 80:
         return ("#f59e0b", "#b45309")
