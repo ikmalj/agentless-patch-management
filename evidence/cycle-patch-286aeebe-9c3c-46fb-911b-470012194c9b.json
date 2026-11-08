@@ -1,0 +1,38 @@
+{
+  "execution": "arn:aws:states:ap-southeast-5:588589592508:execution:serverless-patch-cycle:286aeebe-9c3c-46fb-911b-470012194c9b",
+  "status": "FAILED",
+  "error": "HostsFailed",
+  "report": {
+    "run_id": "286aeebe-9c3c-46fb-911b-470012194c9b",
+    "mode": "patch",
+    "percent": 100,
+    "started": "2026-11-07T06:01:50.049Z",
+    "finished": "2026-11-07T06:34:15.335Z",
+    "duration_s": 1945.3,
+    "hosts_total": 1,
+    "patched": 0,
+    "patched_partial": 0,
+    "compliant": 0,
+    "scanned": 0,
+    "skipped": 0,
+    "failed": 1,
+    "results": [
+      {
+        "host": "serverless-patch-win-01",
+        "ip": "10.0.1.189",
+        "instance_id": "i-0b6462c157a7d6763",
+        "platform": "windows",
+        "workload": "iis",
+        "unit": "KB",
+        "status": "failed",
+        "failed_at": "post_health",
+        "fail_detail": {
+          "Error": "CommandFailed",
+          "Cause": "{\"errorMessage\":\"WSManFaultError: Access is denied.  (extended fault data: {'transport_message': 'Bad HTTP response returned from server. Code 500', 'http_status_code': 500, 'wsmanfault_code': 2147942405, 'fault_code': 's:Receiver', 'fault_subcode': 'w:InternalError'})\",\"errorType\":\"CommandFailed\",\"requestId\":\"1bd4c6e9-4ce9-4e1b-acc3-a01ad78aa1dc\",\"stackTrace\":[\"  File \\\"/var/task/patch_windows.py\\\", line 595, in lambda_handler\\n    result = ACTIONS[action](_session(host[\\\"ip\\\"]), event)\\n\",\"  File \\\"/var/task/patch_windows.py\\\", line 549, in act_health\\n    d = _ps(sess, HEALTH_OUT_PS)\\n\",\"  File \\\"/var/task/patch_windows.py\\\", line 159, in _ps\\n    raise CommandFailed(f\\\"{type(e).__name__}: {e}\\\") from None\\n\"]}"
+        },
+        "advisories_before": 4,
+        "duration_s": 1945.1
+      }
+    ]
+  }
+}

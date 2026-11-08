@@ -1,0 +1,137 @@
+{
+  "execution": "arn:aws:states:ap-southeast-5:588589592508:execution:serverless-patch-cycle:956aeeb4-4c73-4bfb-9182-94d5974f7d04",
+  "status": "SUCCEEDED",
+  "error": null,
+  "report": {
+    "run_id": "956aeeb4-4c73-4bfb-9182-94d5974f7d04",
+    "mode": "patch",
+    "percent": 100,
+    "started": "2026-11-07T05:17:29.045Z",
+    "finished": "2026-11-07T05:49:56.305Z",
+    "duration_s": 1947.3,
+    "hosts_total": 1,
+    "patched": 1,
+    "patched_partial": 0,
+    "compliant": 0,
+    "scanned": 0,
+    "skipped": 0,
+    "failed": 0,
+    "results": [
+      {
+        "host": "serverless-patch-win-01",
+        "ip": "10.0.1.189",
+        "instance_id": "i-0b6462c157a7d6763",
+        "platform": "windows",
+        "workload": "iis",
+        "unit": "KB",
+        "status": "patched",
+        "scope_percent": 100,
+        "advisories_selected": 4,
+        "selected_remaining": 0,
+        "advisories_before": 4,
+        "advisories_after": 0,
+        "advisories_applied": 4,
+        "by_severity_before": {
+          "Critical": 0,
+          "Important": 2,
+          "Moderate": 0,
+          "Low": 0,
+          "Unspecified": 2
+        },
+        "by_severity_after": {
+          "Critical": 0,
+          "Important": 0,
+          "Moderate": 0,
+          "Low": 0,
+          "Unspecified": 0
+        },
+        "pending_security_packages_before": 4,
+        "pending_security_packages_after": 0,
+        "pending_packages_before": 5,
+        "pending_packages_after": 0,
+        "packages_upgraded": 4,
+        "packages_installed": 0,
+        "packages_removed": 0,
+        "updates_failed": 0,
+        "update_results": [
+          {
+            "kb": "KB5128928",
+            "result": "Succeeded",
+            "hresult": "0x00000000"
+          },
+          {
+            "kb": "KB5131594",
+            "result": "Succeeded",
+            "hresult": "0x00000000"
+          },
+          {
+            "kb": "KB5126655",
+            "result": "Succeeded",
+            "hresult": "0x00000000"
+          },
+          {
+            "kb": "KB890830",
+            "result": "Succeeded",
+            "hresult": "0x00000000"
+          }
+        ],
+        "reboot_required": true,
+        "rebooted": true,
+        "reboot_reason": "Windows Update installer requested a restart",
+        "kernel_before": "10.0.20348.5499",
+        "kernel_after": "10.0.20348.5761",
+        "healthy_after": true,
+        "health_detail": "http 200",
+        "defender_excluded": [
+          "KB2267602"
+        ],
+        "install_polls": 26,
+        "followup_passes": 0,
+        "first_pass_remaining": 0,
+        "install_passes": [
+          {
+            "pass": 1,
+            "run_id": "956aeeb4-4c73-4bfb-9182-94d5974f7d04",
+            "kbs": [
+              "KB5128928",
+              "KB5131594",
+              "KB5126655",
+              "KB890830"
+            ],
+            "upgraded": 4,
+            "update_results": [
+              {
+                "kb": "KB5128928",
+                "result": "Succeeded",
+                "hresult": "0x00000000"
+              },
+              {
+                "kb": "KB5131594",
+                "result": "Succeeded",
+                "hresult": "0x00000000"
+              },
+              {
+                "kb": "KB5126655",
+                "result": "Succeeded",
+                "hresult": "0x00000000"
+              },
+              {
+                "kb": "KB890830",
+                "result": "Succeeded",
+                "hresult": "0x00000000"
+              }
+            ],
+            "reboot_required": true,
+            "remaining_after": 0,
+            "remaining_ids": [],
+            "settle": null,
+            "at": "2026-11-07T05:49:39.539Z"
+          }
+        ],
+        "followup_error": null,
+        "install_log": "C:\\ProgramData\\serverless-patch\\956aeeb4-4c73-4bfb-9182-94d5974f7d04.log",
+        "duration_s": 1947
+      }
+    ]
+  }
+}

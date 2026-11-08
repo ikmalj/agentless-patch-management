@@ -1,0 +1,14 @@
+{
+  "deployed_at": "2026-11-04T22:28:39",
+  "sns_topic": "arn:aws:sns:ap-southeast-5:588589592508:serverless-patch-notify",
+  "email": "ikmalj.tech@gmail.com",
+  "email_status": "confirmed",
+  "metrics_lambda": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-metrics",
+  "metrics_sha256": "wtDr0oG+YM2ReUHYZNOkfkjrFEjJyjegyCZiqaiByiM=",
+  "metrics_role": "arn:aws:iam::588589592508:role/serverless-patch-metrics-lambda-role",
+  "metrics_log_group": "/aws/lambda/serverless-patch-metrics",
+  "namespace": "ServerlessPatch",
+  "state_machine": "arn:aws:states:ap-southeast-5:588589592508:stateMachine:serverless-patch-cycle",
+  "dashboard": "PatchManagement-Dashboard",
+  "summary_widget": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-summary-widget"
+}

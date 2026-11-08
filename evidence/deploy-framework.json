@@ -1,0 +1,11 @@
+{
+  "deployed_at": "2026-11-07T14:59:58",
+  "lambda": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-rhel",
+  "lambda_sha256": "qV8J6azgPJd802op2wsBhjAK6+A932F8lHx7Iz3mZu4=",
+  "win_lambda": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-windows",
+  "win_lambda_sha256": "ttylRIWImY/dTRTKjS+IYdlRIK367dITw6cdfz/RUGo=",
+  "state_machine": "arn:aws:states:ap-southeast-5:588589592508:stateMachine:serverless-patch-cycle",
+  "sfn_role": "arn:aws:iam::588589592508:role/serverless-patch-sfn-role",
+  "scheduler_role": "arn:aws:iam::588589592508:role/serverless-patch-scheduler-role",
+  "weekly_schedule": "serverless-patch-weekly"
+}

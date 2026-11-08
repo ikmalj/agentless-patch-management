@@ -1,0 +1,9 @@
+{
+  "restored_at": "2026-11-07T12:10:25",
+  "tasks": {
+    "win-01": "replacevol-0edd1c1ac1ac1ed1a"
+  },
+  "result": {
+    "win-01": "succeeded"
+  }
+}

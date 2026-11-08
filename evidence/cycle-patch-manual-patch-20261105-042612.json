@@ -1,0 +1,106 @@
+{
+  "execution": "arn:aws:states:ap-southeast-5:588589592508:execution:serverless-patch-cycle:manual-patch-20261105-042612",
+  "status": "SUCCEEDED",
+  "error": null,
+  "report": {
+    "run_id": "manual-patch-20261105-042612",
+    "mode": "patch",
+    "percent": 100,
+    "started": "2026-11-04T20:26:14.582Z",
+    "finished": "2026-11-04T20:27:53.786Z",
+    "duration_s": 99.2,
+    "hosts_total": 1,
+    "patched": 0,
+    "patched_partial": 1,
+    "compliant": 0,
+    "scanned": 0,
+    "skipped": 0,
+    "failed": 0,
+    "results": [
+      {
+        "host": "serverless-patch-win-01",
+        "ip": "10.0.1.189",
+        "instance_id": "i-0b6462c157a7d6763",
+        "platform": "windows",
+        "workload": "iis",
+        "unit": "KB",
+        "status": "patched_partial",
+        "scope_percent": 100,
+        "advisories_selected": 1,
+        "selected_remaining": 1,
+        "advisories_before": 1,
+        "advisories_after": 1,
+        "advisories_applied": 0,
+        "by_severity_before": {
+          "Critical": 0,
+          "Important": 1,
+          "Moderate": 0,
+          "Low": 0,
+          "Unspecified": 0
+        },
+        "by_severity_after": {
+          "Critical": 0,
+          "Important": 1,
+          "Moderate": 0,
+          "Low": 0,
+          "Unspecified": 0
+        },
+        "pending_security_packages_before": 1,
+        "pending_security_packages_after": 1,
+        "pending_packages_before": 2,
+        "pending_packages_after": 2,
+        "packages_upgraded": 1,
+        "packages_installed": 0,
+        "packages_removed": 0,
+        "updates_failed": 0,
+        "update_results": [
+          {
+            "kb": "KB5131594",
+            "result": "Succeeded",
+            "hresult": "0x00000000"
+          }
+        ],
+        "reboot_required": false,
+        "rebooted": false,
+        "reboot_reason": "not required",
+        "kernel_before": "10.0.20348.5761",
+        "kernel_after": "10.0.20348.5761",
+        "healthy_after": true,
+        "health_detail": "http 200",
+        "defender_excluded": [
+          "KB2267602"
+        ],
+        "install_polls": 1,
+        "followup_passes": 0,
+        "first_pass_remaining": 1,
+        "install_passes": [
+          {
+            "pass": 1,
+            "run_id": "manual-patch-20261105-042612",
+            "kbs": [
+              "KB5131594"
+            ],
+            "upgraded": 1,
+            "update_results": [
+              {
+                "kb": "KB5131594",
+                "result": "Succeeded",
+                "hresult": "0x00000000"
+              }
+            ],
+            "reboot_required": false,
+            "remaining_after": 1,
+            "remaining_ids": [
+              "KB5131594"
+            ],
+            "settle": null,
+            "at": "2026-11-04T20:27:30.948Z"
+          }
+        ],
+        "followup_error": null,
+        "install_log": "C:\\ProgramData\\serverless-patch\\manual-patch-20261105-042612.log",
+        "duration_s": 99
+      }
+    ]
+  }
+}

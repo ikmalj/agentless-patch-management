@@ -1,0 +1,307 @@
+{
+  "execution": "arn:aws:states:ap-southeast-5:588589592508:execution:serverless-patch-cycle:496aeb49-2430-47ef-8330-68c9b174ba2d",
+  "status": "SUCCEEDED",
+  "error": null,
+  "report": {
+    "run_id": "496aeb49-2430-47ef-8330-68c9b174ba2d",
+    "mode": "patch",
+    "percent": 100,
+    "started": "2026-11-04T15:03:41.046Z",
+    "finished": "2026-11-04T16:04:52.602Z",
+    "duration_s": 3671.6,
+    "hosts_total": 3,
+    "patched": 2,
+    "patched_partial": 1,
+    "compliant": 0,
+    "scanned": 0,
+    "skipped": 0,
+    "failed": 0,
+    "results": [
+      {
+        "host": "serverless-patch-rhel-01",
+        "ip": "10.0.1.175",
+        "instance_id": "i-0ba983a12665d852f",
+        "platform": "rhel",
+        "workload": "nginx",
+        "unit": "RHSA",
+        "status": "patched",
+        "scope_percent": 100,
+        "advisories_selected": 394,
+        "selected_remaining": 0,
+        "advisories_before": 394,
+        "advisories_after": 0,
+        "advisories_applied": 394,
+        "by_severity_before": {
+          "Critical": 2,
+          "Important": 170,
+          "Moderate": 199,
+          "Low": 23
+        },
+        "by_severity_after": {
+          "Critical": 0,
+          "Important": 0,
+          "Moderate": 0,
+          "Low": 0
+        },
+        "pending_security_packages_before": 141,
+        "pending_security_packages_after": 0,
+        "pending_packages_before": 283,
+        "pending_packages_after": 133,
+        "packages_upgraded": 147,
+        "packages_installed": 81,
+        "packages_removed": 0,
+        "reboot_required": true,
+        "rebooted": true,
+        "reboot_reason": "needs-restarting: core libraries or services updated",
+        "kernel_before": "5.14.0-284.90.1.el9_2.x86_64",
+        "kernel_after": "5.14.0-687.65.1.el9_8.x86_64",
+        "healthy_after": true,
+        "health_detail": "http 200",
+        "install_polls": 1,
+        "followup_passes": 0,
+        "first_pass_remaining": null,
+        "install_passes": [],
+        "followup_error": null,
+        "install_log": "/var/log/serverless-patch/496aeb49-2430-47ef-8330-68c9b174ba2d.log",
+        "duration_s": 257.5
+      },
+      {
+        "host": "serverless-patch-rhel-02",
+        "ip": "10.0.1.254",
+        "instance_id": "i-008641b7be92f9871",
+        "platform": "rhel",
+        "workload": "mysql",
+        "unit": "RHSA",
+        "status": "patched",
+        "scope_percent": 100,
+        "advisories_selected": 394,
+        "selected_remaining": 0,
+        "advisories_before": 394,
+        "advisories_after": 0,
+        "advisories_applied": 394,
+        "by_severity_before": {
+          "Critical": 2,
+          "Important": 170,
+          "Moderate": 199,
+          "Low": 23
+        },
+        "by_severity_after": {
+          "Critical": 0,
+          "Important": 0,
+          "Moderate": 0,
+          "Low": 0
+        },
+        "pending_security_packages_before": 141,
+        "pending_security_packages_after": 0,
+        "pending_packages_before": 283,
+        "pending_packages_after": 133,
+        "packages_upgraded": 147,
+        "packages_installed": 23,
+        "packages_removed": 0,
+        "reboot_required": true,
+        "rebooted": true,
+        "reboot_reason": "needs-restarting: core libraries or services updated",
+        "kernel_before": "5.14.0-284.90.1.el9_2.x86_64",
+        "kernel_after": "5.14.0-687.65.1.el9_8.x86_64",
+        "healthy_after": true,
+        "health_detail": "sakila.film rows 1000",
+        "install_polls": 1,
+        "followup_passes": 0,
+        "first_pass_remaining": null,
+        "install_passes": [],
+        "followup_error": null,
+        "install_log": "/var/log/serverless-patch/496aeb49-2430-47ef-8330-68c9b174ba2d.log",
+        "duration_s": 263.3
+      },
+      {
+        "host": "serverless-patch-win-01",
+        "ip": "10.0.1.189",
+        "instance_id": "i-0b6462c157a7d6763",
+        "platform": "windows",
+        "workload": "iis",
+        "unit": "KB",
+        "status": "patched_partial",
+        "scope_percent": 100,
+        "advisories_selected": 4,
+        "selected_remaining": 1,
+        "advisories_before": 4,
+        "advisories_after": 1,
+        "advisories_applied": 3,
+        "by_severity_before": {
+          "Critical": 0,
+          "Important": 2,
+          "Moderate": 0,
+          "Low": 0,
+          "Unspecified": 2
+        },
+        "by_severity_after": {
+          "Critical": 0,
+          "Important": 1,
+          "Moderate": 0,
+          "Low": 0,
+          "Unspecified": 0
+        },
+        "pending_security_packages_before": 4,
+        "pending_security_packages_after": 1,
+        "pending_packages_before": 4,
+        "pending_packages_after": 1,
+        "packages_upgraded": 4,
+        "packages_installed": 0,
+        "packages_removed": 0,
+        "updates_failed": 0,
+        "update_results": [
+          {
+            "kb": "KB5128928",
+            "result": "Succeeded",
+            "hresult": "0x00000000"
+          },
+          {
+            "kb": "KB5131594",
+            "result": "Succeeded",
+            "hresult": "0x00000000"
+          },
+          {
+            "kb": "KB5126655",
+            "result": "Succeeded",
+            "hresult": "0x00000000"
+          },
+          {
+            "kb": "KB890830",
+            "result": "Succeeded",
+            "hresult": "0x00000000"
+          }
+        ],
+        "reboot_required": false,
+        "rebooted": true,
+        "reboot_reason": "not required",
+        "kernel_before": "10.0.20348.5499",
+        "kernel_after": "10.0.20348.5761",
+        "healthy_after": true,
+        "health_detail": "http 200",
+        "defender_excluded": [],
+        "install_polls": 1,
+        "followup_passes": 2,
+        "first_pass_remaining": 1,
+        "install_passes": [
+          {
+            "pass": 1,
+            "run_id": "496aeb49-2430-47ef-8330-68c9b174ba2d",
+            "kbs": [
+              "KB5128928",
+              "KB5131594",
+              "KB5126655",
+              "KB890830"
+            ],
+            "upgraded": 4,
+            "update_results": [
+              {
+                "kb": "KB5128928",
+                "result": "Succeeded",
+                "hresult": "0x00000000"
+              },
+              {
+                "kb": "KB5131594",
+                "result": "Succeeded",
+                "hresult": "0x00000000"
+              },
+              {
+                "kb": "KB5126655",
+                "result": "Succeeded",
+                "hresult": "0x00000000"
+              },
+              {
+                "kb": "KB890830",
+                "result": "Succeeded",
+                "hresult": "0x00000000"
+              }
+            ],
+            "reboot_required": true,
+            "remaining_after": 1,
+            "remaining_ids": [
+              "KB5131594"
+            ],
+            "settle": null,
+            "at": "2026-11-04T15:26:46.467Z"
+          },
+          {
+            "pass": 2,
+            "run_id": "496aeb49-2430-47ef-8330-68c9b174ba2d-f1",
+            "kbs": [
+              "KB5131594"
+            ],
+            "upgraded": 1,
+            "update_results": [
+              {
+                "kb": "KB5131594",
+                "result": "Succeeded",
+                "hresult": "0x00000000"
+              }
+            ],
+            "reboot_required": false,
+            "remaining_after": 1,
+            "remaining_ids": [
+              "KB5131594"
+            ],
+            "settle": {
+              "settled": true,
+              "waiting_for": [],
+              "boot_id": "2026-11-04T15:27:02.749741Z",
+              "uptime_s": 912,
+              "trustedinstaller": "Stopped",
+              "tiworker": 0,
+              "cbs_reboot_pending": false,
+              "cbs_packages_pending": false,
+              "pending_xml": false,
+              "wu_reboot_required": false,
+              "action": "servicing",
+              "host": "serverless-patch-win-01",
+              "ts": "2026-11-04T23:42:14+08:00",
+              "duration_ms": 770
+            },
+            "at": "2026-11-04T15:43:29.959Z"
+          },
+          {
+            "pass": 3,
+            "run_id": "496aeb49-2430-47ef-8330-68c9b174ba2d-f2",
+            "kbs": [
+              "KB5131594"
+            ],
+            "upgraded": 1,
+            "update_results": [
+              {
+                "kb": "KB5131594",
+                "result": "Succeeded",
+                "hresult": "0x00000000"
+              }
+            ],
+            "reboot_required": false,
+            "remaining_after": 1,
+            "remaining_ids": [
+              "KB5131594"
+            ],
+            "settle": {
+              "settled": true,
+              "waiting_for": [],
+              "boot_id": "2026-11-04T15:27:02.749741Z",
+              "uptime_s": 2194,
+              "trustedinstaller": "Stopped",
+              "tiworker": 0,
+              "cbs_reboot_pending": false,
+              "cbs_packages_pending": false,
+              "pending_xml": false,
+              "wu_reboot_required": false,
+              "action": "servicing",
+              "host": "serverless-patch-win-01",
+              "ts": "2026-11-05T00:03:36+08:00",
+              "duration_ms": 1016
+            },
+            "at": "2026-11-04T16:04:46.3Z"
+          }
+        ],
+        "followup_error": null,
+        "install_log": "C:\\ProgramData\\serverless-patch\\496aeb49-2430-47ef-8330-68c9b174ba2d-f2.log",
+        "duration_s": 3671.4
+      }
+    ]
+  }
+}
