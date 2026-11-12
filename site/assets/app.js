@@ -612,4 +612,5 @@
   if (window.ResizeObserver) new ResizeObserver(function () { if (Math.abs(grid.clientWidth - lastW) > 8) { lastW = grid.clientWidth; redrawSoon(); } }).observe(grid);
   var mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
   if (mq && mq.addEventListener) mq.addEventListener('change', redrawSoon);
+  document.addEventListener('themechange', redrawSoon);   // the Auto / Light / Dark switch (assets/theme.js)
 })();

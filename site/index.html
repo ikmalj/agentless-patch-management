@@ -8,6 +8,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Open+Sans:wght@400;600;700&display=swap">
+<script>
+  // Apply a saved Light/Dark choice before the page paints (no flash); "Auto" follows the device.
+  try { var t = localStorage.getItem('theme'); if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+</script>
 <link rel="stylesheet" href="assets/style.css">
 <link rel="stylesheet" href="assets/dashboard.css">
 </head>
@@ -21,6 +25,11 @@
       <a href="#dashboard">Dashboard</a>
       <a href="#how">How it works</a>
     </nav>
+    <div class="theme" role="group" aria-label="Colour theme">
+      <button type="button" data-theme-choice="auto" aria-pressed="true" title="Follow this device's setting">Auto</button>
+      <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+      <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+    </div>
   </div>
 </header>
 
@@ -103,6 +112,7 @@
 <div class="cw-tip" id="tip" hidden></div>
 
 <script src="data/patch-data.js"></script>
+<script src="assets/theme.js"></script>
 <script src="assets/app.js"></script>
 </body>
 </html>
