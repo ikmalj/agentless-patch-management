@@ -273,6 +273,11 @@ def view_severity(s):
 VIEWS = {"kpi": view_kpi, "hosts": view_hosts, "severity": view_severity}
 
 
+def render(view, s, dark=False):
+    """One panel as the widget returns it. Also used by site_publisher.py, so the website shows the same HTML."""
+    return f'<div class="sp cwdb-no-default-styles">{css(dark)}{VIEWS[view](s)}</div>'
+
+
 def lambda_handler(event, context=None, logs_client=None):
     if event.get("describe"):
         return DOCS
@@ -285,7 +290,7 @@ def lambda_handler(event, context=None, logs_client=None):
     try:
         if view not in VIEWS:
             raise ValueError(f"unknown view {view!r}; use kpi, hosts or severity")
-        body = VIEWS[view](summarise(fetch(start, end, logs_client)))
+        return render(view, summarise(fetch(start, end, logs_client)), dark)
     except Exception as e:  # show the problem in the widget instead of a blank panel
         print(json.dumps({"error": type(e).__name__, "detail": str(e)}))
         body = f'<div class="sp-empty">Widget error: {esc(type(e).__name__)}: {esc(str(e))}</div>'

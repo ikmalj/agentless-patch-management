@@ -1,40 +1,44 @@
-"""Build the data file for the project website from evidence/.
+"""Build the website's fallback evaluation data from evidence/.
 
-Reads every evidence/cycle-patch-*.json result, turns each one into per-host and per-cycle
-records with the same rules the serverless-patch-metrics Lambda uses (lambda/metrics.py),
-and writes site/data/patch-data.js, which site/index.html loads.
+The published site reads data/evaluation.json, which the serverless-patch-site-publisher Lambda
+writes from CloudWatch (the same data as the PatchManagement-Dashboard). This script builds
+site/data/patch-data.js from the cycle results in evidence/ instead, in the same format, so the page
+also works opened from disk and has something to show before the publisher has run.
 
-Only what the dashboard shows is written: no account ID, ARNs, instance IDs or IP addresses.
-Run it again after new patch runs:
+It turns every evidence/cycle-*.json report into the records the serverless-patch-metrics Lambda
+logs (lambda/metrics.py), then uses the publisher's own builder (lambda/site_publisher.py), so the
+Patch Summary panels are the same HTML as the CloudWatch custom widgets. Two things exist only in
+CloudWatch and are left out here: cost per cycle and the Step Functions / Lambda / SNS counts.
 
     python site/build_site_data.py
     python site/build_site_data.py --from 2026-11-01 --to 2026-11-12
 
 --from / --to keep only cycles that started on those days, Malaysia time (UTC+8), both inclusive.
-The page then shows that window as its reporting period.
+No account ID, ARNs, instance IDs or IP addresses are written, and the same evidence always gives
+the same file (no build time in it), so a deploy run does not leave the file modified in git.
 """
 import argparse
 import glob
 import json
 import os
 import sys
-from datetime import datetime, timedelta, timezone  # noqa: F401 (timezone used by MYT)
+from datetime import datetime, timedelta, timezone
 
 sys.dont_write_bytecode = True
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "lambda"))
-import metrics  # noqa: E402  (lambda/metrics.py: attempted / verified counts and verdicts)
+import metrics  # noqa: E402  (records exactly as the metrics Lambda logs them)
+import site_publisher  # noqa: E402  (the page's data format, shared with the publisher Lambda)
 
 EVIDENCE = os.path.join(ROOT, "evidence")
 OUT = os.path.join(ROOT, "site", "data", "patch-data.js")
-SEVERITY_FIELDS = ("fixed_critical", "fixed_important", "fixed_moderate", "fixed_low", "fixed_unrated")
 MYT = timezone(timedelta(hours=8))
 
 
-def myt_day(text):
-    """A YYYY-MM-DD argument as the start of that day in Malaysia time."""
+def ymd(text):
     try:
-        return datetime.strptime(text, "%Y-%m-%d").replace(tzinfo=MYT)
+        datetime.strptime(text, "%Y-%m-%d")
+        return text
     except ValueError:
         raise argparse.ArgumentTypeError(f"{text!r} is not a date like 2026-11-01")
 
@@ -43,104 +47,59 @@ def parse_time(text):
     return datetime.fromisoformat(str(text).replace("Z", "+00:00"))
 
 
-def short(host):
-    return (host or "").replace("serverless-patch-", "")
-
-
 def main():
     ap = argparse.ArgumentParser(description="Build site/data/patch-data.js from evidence/.")
-    ap.add_argument("--from", dest="date_from", type=myt_day, help="first day to include, YYYY-MM-DD (MYT)")
-    ap.add_argument("--to", dest="date_to", type=myt_day, help="last day to include, YYYY-MM-DD (MYT)")
+    ap.add_argument("--from", dest="date_from", type=ymd, help="first day to include, YYYY-MM-DD (MYT)")
+    ap.add_argument("--to", dest="date_to", type=ymd, help="last day to include, YYYY-MM-DD (MYT)")
     args = ap.parse_args()
-    start = args.date_from
-    end = args.date_to + timedelta(days=1) if args.date_to else None   # exclusive
-    if start and end and end <= start:
+
+    reports = []
+    for path in sorted(glob.glob(os.path.join(EVIDENCE, "cycle-*.json"))):
+        with open(path, encoding="utf-8-sig") as f:
+            report = (json.load(f) or {}).get("report") or {}
+        if report.get("mode") in ("scan", "patch") and report.get("started") and report.get("results") is not None:
+            reports.append(report)
+    if not reports:
+        sys.exit(f"no cycle-*.json reports in {EVIDENCE}")
+
+    starts = sorted(parse_time(r["started"]) for r in reports)
+    frm = args.date_from or starts[0].astimezone(MYT).strftime("%Y-%m-%d")
+    to = args.date_to or starts[-1].astimezone(MYT).strftime("%Y-%m-%d")
+    far_future = datetime(9999, 1, 1, tzinfo=timezone.utc)
+    start, end, label = site_publisher.eval_window(far_future, frm, to)
+    if end <= start:
         sys.exit("--to is before --from")
 
-    host_runs, cycles = [], []
-    skipped = 0
-    files = sorted(glob.glob(os.path.join(EVIDENCE, "cycle-patch-*.json")))
-    if not files:
-        sys.exit(f"no cycle-patch-*.json files in {EVIDENCE}")
-    for path in files:
-        with open(path, encoding="utf-8-sig") as f:
-            doc = json.load(f)
-        report = doc.get("report") or {}
-        if report.get("mode") != "patch" or not report.get("results"):
-            continue
-        began = parse_time(report.get("started"))
-        if (start and began < start) or (end and began >= end):
+    records, kept, skipped = [], 0, 0
+    for report in reports:
+        began = parse_time(report["started"])
+        if not (start <= began < end):
             skipped += 1
             continue
+        kept += 1
+        # The metrics Lambda logs its records when the cycle finishes.
+        ts = site_publisher.logs_ts(parse_time(report.get("finished") or report["started"]))
         hosts = metrics.host_records(report, 0)
-        for h in hosts:
-            row = {
-                "run_id": report.get("run_id"),
-                "started": report.get("started"),
-                "host": short(h["host"]),
-                "platform": h["platform"],
-                "workload": h["workload"],
-                "unit": h["unit"],
-                "status": h["status"],
-                "scope_pct": h["percent"],
-                "before": h["before"],
-                "after": h["after"],
-                "attempted": h["attempted"],
-                "succeeded": h["succeeded"],
-                "duration_s": h["duration_s"],
-                "rebooted": h["rebooted"],
-                "healthy": h["healthy"],
-                "failed_at": h["failed_at"],
-            }
-            for k in SEVERITY_FIELDS:
-                row[k] = h.get(k, 0)
-            host_runs.append(row)
-        cycle = metrics.cycle_record(report, hosts, {"cost_usd": None}, None, 0)
-        word, summary = metrics.verdict(report)
-        cycles.append({
-            "run_id": report.get("run_id"),
-            "started": report.get("started"),
-            "hosts": [short(r.get("host")) for r in report["results"]],
-            "hosts_total": cycle["hosts_total"],
-            "scope_pct": cycle["percent"],
-            "result": word,
-            "summary": summary,
-            "patched": cycle["patched"],
-            "partial": cycle["patched_partial"],
-            "failed": cycle["failed"],
-            "attempted": cycle["attempted"],
-            "succeeded": cycle["succeeded"],
-            "duration_s": cycle["duration_s"],
-        })
+        cycle = metrics.cycle_record(report, hosts, {"cost_usd": None}, None, 0)   # no cost in evidence
+        for rec in hosts + [cycle]:
+            rec = json.loads(json.dumps(rec, default=str))
+            rec["_ts"] = ts
+            records.append(rec)
+    if not kept:
+        sys.exit("no cycles in the selected dates; nothing written")
 
-    if not cycles:
-        sys.exit("no patch cycles in the selected dates; nothing written")
-    host_runs.sort(key=lambda r: r["started"])
-    cycles.sort(key=lambda r: r["started"])
-    # No build time or commit in the file: the same evidence always gives the same file, so
-    # running deploy-site.ps1 does not leave site/data/patch-data.js modified in git.
-    data = {
-        "view": "evaluation",
-        "region": "ap-southeast-5",
-        "lambda_limit_s": 900,
-        "window": {
-            "from": start.strftime("%Y-%m-%d") if start else None,
-            "to": args.date_to.strftime("%Y-%m-%d") if args.date_to else None,
-        },
-        "host_runs": host_runs,
-        "cycles": cycles,
-    }
+    data = site_publisher.build_payload(records, "evaluation", start, end, label, source="evidence",
+                                        now=far_future, cost_known=False)
+    data.pop("generated_at", None)
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8", newline="\n") as f:
         f.write("// Generated by site/build_site_data.py from evidence/. Do not edit by hand.\n")
         f.write("window.PATCH_DATA = ")
-        json.dump(data, f, indent=1)
+        json.dump(data, f, indent=1, ensure_ascii=False)
         f.write(";\n")
-    window = ""
-    if start or end:
-        window = f" from {data['window']['from'] or 'the first run'} to {data['window']['to'] or 'the last run'} (MYT)"
-    print(f"wrote {os.path.relpath(OUT, ROOT)}: {len(cycles)} patch cycles, {len(host_runs)} host runs{window}"
-          + (f"; {skipped} cycles outside the dates left out" if skipped else ""))
+    patch = sum(1 for r in data["records"] if r.get("record") == "cycle" and r.get("mode") == "patch")
+    print(f"wrote {os.path.relpath(OUT, ROOT)}: {kept} cycles ({patch} patch), {len(data['records'])} records, "
+          f"{label} (MYT)" + (f"; {skipped} cycles outside the dates left out" if skipped else ""))
 
 
 if __name__ == "__main__":

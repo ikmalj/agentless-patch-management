@@ -10,7 +10,8 @@
     6. Custom domain (optional): ACM certificate in us-east-1, then the domain on the distribution
     7. Upload site\ and clear the CloudFront cache
     8. Live updates: Lambda serverless-patch-site-publisher + EventBridge rule on every status change
-       of the state machine; it rewrites data/live.json from the metrics records. First publish now.
+       of the state machine; it rewrites data/live.json (last $SiteLiveDays days) and data/evaluation.json
+       ($SiteFrom..$SiteTo) from the same CloudWatch data as PatchManagement-Dashboard. First publish now.
   Safe to run again: every step reuses what already exists. After this, the Live view updates by
   itself; run the script again only to change the page, the evaluation period or the domain.
   Does not touch any host, the patch Lambdas, the state machine or the CloudWatch dashboard.
@@ -258,9 +259,10 @@ $keys = foreach ($f in $local) {
     Invoke-Aws s3 cp $f.FullName "s3://$SiteBucket/$key" --content-type $type --cache-control 'public, max-age=300' --only-show-errors | Out-Null
     $key
 }
-# Remove objects that are no longer in site\. data/live.json belongs to the publisher Lambda: keep it.
+# Remove objects that are no longer in site\. The publisher Lambda's files are not in site\: keep them.
+$publisherFiles = @('data/live.json', 'data/evaluation.json')
 $remote = @((Invoke-Aws s3api list-objects-v2 --bucket $SiteBucket).Contents | ForEach-Object Key)
-foreach ($old in ($remote | Where-Object { $_ -and $_ -notin $keys -and $_ -ne 'data/live.json' })) {
+foreach ($old in ($remote | Where-Object { $_ -and $_ -notin $keys -and $_ -notin $publisherFiles })) {
     Invoke-Aws s3 rm "s3://$SiteBucket/$old" --only-show-errors | Out-Null
     Write-Note "removed $old"
 }
@@ -288,7 +290,8 @@ if (Test-Aws iam get-role --role-name $SitePublisherRole) {
     Write-Ok "$SitePublisherRole created"
     $pubRoleNew = $true
 }
-# Least privilege: query the metrics log group, see this state machine's runs, write one file, clear its cache.
+# Least privilege: query the metrics log group, read metric counts, see this state machine's runs,
+# write its two files, clear the site cache.
 Save-Json ([ordered]@{
     Version   = '2012-10-17'
     Statement = @(
@@ -300,13 +303,15 @@ Save-Json ([ordered]@{
         [ordered]@{ Sid = 'SeeRunningCycles'; Effect = 'Allow'; Action = 'states:ListExecutions'; Resource = $StateMachineArn }
         [ordered]@{ Sid = 'ReadRunMode'; Effect = 'Allow'; Action = 'states:DescribeExecution'
                     Resource = "arn:aws:states:${Region}:${Account}:execution:${StateMachineName}:*" }
-        [ordered]@{ Sid = 'WriteLiveDataOnly'; Effect = 'Allow'; Action = 's3:PutObject'; Resource = "arn:aws:s3:::$SiteBucket/data/live.json" }
+        [ordered]@{ Sid = 'ReadMetricCounts'; Effect = 'Allow'; Action = 'cloudwatch:GetMetricData'; Resource = '*' }
+        [ordered]@{ Sid = 'WriteDashboardDataOnly'; Effect = 'Allow'; Action = 's3:PutObject'
+                    Resource = @("arn:aws:s3:::$SiteBucket/data/live.json", "arn:aws:s3:::$SiteBucket/data/evaluation.json") }
         [ordered]@{ Sid = 'ClearSiteCache'; Effect = 'Allow'; Action = 'cloudfront:CreateInvalidation'; Resource = $distArn }
     )
 }) (Join-Path $BuildDir 'site-publisher-policy.json') -Depth 10
 Invoke-Aws iam put-role-policy --role-name $SitePublisherRole --policy-name 'publish-live-site-data' `
     --policy-document 'file://build/site-publisher-policy.json' | Out-Null
-Write-Ok 'inline policy publish-live-site-data set (metrics log group query, list/describe runs, put data/live.json, invalidate)'
+Write-Ok 'inline policy publish-live-site-data set (metrics log query, metric counts, list/describe runs, put data/*.json, invalidate)'
 
 $plg = @((Invoke-Aws logs describe-log-groups --log-group-name-prefix $pubLogGroup).logGroups | Where-Object logGroupName -eq $pubLogGroup)
 if (-not $plg) { Invoke-Aws logs create-log-group --log-group-name $pubLogGroup --tags 'project=serverless-patch' | Out-Null }
@@ -318,14 +323,21 @@ Save-Json @{ Variables = @{
     DISTRIBUTION_ID   = $distId
     STATE_MACHINE_ARN = $StateMachineArn
     LIVE_DAYS         = [string]$SiteLiveDays
+    EVAL_FROM         = [string]$From
+    EVAL_TO           = [string]$To
+    RHEL_FN           = $RhelFn
+    WIN_FN            = $WinFn
+    METRICS_FN        = $MetricsFn
+    TOPIC_NAME        = $TopicName
 } } (Join-Path $BuildDir 'site-publisher-env.json')
 $zip = Join-Path $BuildDir "$SitePublisherFn.zip"
-Compress-Archive -Path (Join-Path $PSScriptRoot 'lambda\site_publisher.py'), (Join-Path $PSScriptRoot 'lambda\metrics.py') -DestinationPath $zip -Force
-$pDesc = 'serverless-patch website: rewrites data/live.json after each cycle starts or ends. Read-only on AWS, no host access, no VPC.'
+# summary_widget.py goes in too: the website's Patch Summary panels are drawn by the same code as the CloudWatch widgets.
+Compress-Archive -Path (Join-Path $PSScriptRoot 'lambda\site_publisher.py'), (Join-Path $PSScriptRoot 'lambda\summary_widget.py') -DestinationPath $zip -Force
+$pDesc = 'serverless-patch website: rewrites the dashboard data after each cycle starts or ends. Read-only on AWS, no host access, no VPC.'
 if (Test-Aws lambda get-function --function-name $SitePublisherFn) {
     Invoke-Aws lambda update-function-code --function-name $SitePublisherFn --zip-file "fileb://build/$SitePublisherFn.zip" | Out-Null
     Invoke-Aws lambda wait function-updated-v2 --function-name $SitePublisherFn | Out-Null
-    Invoke-Aws lambda update-function-configuration --function-name $SitePublisherFn --timeout 180 --memory-size 256 `
+    Invoke-Aws lambda update-function-configuration --function-name $SitePublisherFn --timeout 300 --memory-size 256 `
         --description $pDesc --environment file://build/site-publisher-env.json | Out-Null
     Write-Ok 'Lambda updated'
 } else {
@@ -334,7 +346,7 @@ if (Test-Aws lambda get-function --function-name $SitePublisherFn) {
         try {
             Invoke-Aws lambda create-function --function-name $SitePublisherFn --runtime python3.13 --architectures x86_64 `
                 --handler site_publisher.lambda_handler --role $pubRoleArn --zip-file "fileb://build/$SitePublisherFn.zip" `
-                --timeout 180 --memory-size 256 --description $pDesc --environment file://build/site-publisher-env.json `
+                --timeout 300 --memory-size 256 --description $pDesc --environment file://build/site-publisher-env.json `
                 --tags 'project=serverless-patch' | Out-Null
             break
         } catch {
@@ -369,11 +381,12 @@ Write-Ok "EventBridge rule $ruleName -> $SitePublisherFn (RUNNING, SUCCEEDED, FA
 # First publish now, so the Live view has data before the next cycle.
 Save-Json @{ source = 'deploy-site.ps1' } (Join-Path $BuildDir 'site-publisher-test.json')
 $meta = Invoke-Aws lambda invoke --function-name $SitePublisherFn --cli-binary-format raw-in-base64-out `
-    --cli-read-timeout 200 --payload file://build/site-publisher-test.json build/site-publisher-out.json
+    --cli-read-timeout 320 --payload file://build/site-publisher-test.json build/site-publisher-out.json
 $pout = Get-Content (Join-Path $BuildDir 'site-publisher-out.json') -Raw
 if ($meta.FunctionError) { throw "first publish failed: $pout" }
 $pres = $pout | ConvertFrom-Json
-Write-Ok "data/live.json published: $($pres.cycles) patch cycles, $($pres.host_runs) host runs in the last $SiteLiveDays days, status $($pres.status)"
+Write-Ok "dashboard data published: $($pres.patch_cycles) patch cycles in the last $SiteLiveDays days ($($pres.records) records), status $($pres.status)"
+Write-Ok ("files: " + (($pres.written.PSObject.Properties | ForEach-Object { "$($_.Name) ($([math]::Round($_.Value / 1024)) KB)" }) -join ', '))
 
 # ---------------------------------------------------------------- 9. summary
 Next-Step 'Summary'

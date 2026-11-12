@@ -4,11 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Agentless Patch Management</title>
-<meta name="description" content="Centralized agentless patch management for RHEL 9 and Windows Server 2022 using AWS EventBridge, Step Functions and Lambda, with results from the evaluation runs.">
+<meta name="description" content="Centralized agentless patch management for RHEL 9 and Windows Server 2022 using AWS EventBridge, Step Functions and Lambda, with its live CloudWatch dashboard.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Open+Sans:wght@400;600;700&display=swap">
 <link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/dashboard.css">
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -17,9 +18,7 @@
   <div class="wrap topbar-in">
     <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true"></span>serverless-patch</a>
     <nav aria-label="Sections">
-      <a href="#results">Results</a>
-      <a href="#hosts">Hosts</a>
-      <a href="#cycles">Cycles</a>
+      <a href="#dashboard">Dashboard</a>
       <a href="#how">How it works</a>
     </nav>
   </div>
@@ -43,81 +42,27 @@
         <li><span class="svc svc-obs">SNS + CloudWatch</span><span class="pipe-note">email and dashboard</span></li>
       </ol>
 
-      <div class="hero-controls">
-        <div class="views" role="group" aria-label="Results to show">
-          <button type="button" id="view-live" aria-pressed="true"><span class="live-dot" aria-hidden="true"></span>Live</button>
-          <button type="button" id="view-evaluation" aria-pressed="false">Evaluation <span id="eval-range"></span></button>
+    </div>
+  </section>
+
+  <section class="cw-band" id="dashboard" aria-labelledby="cw-h">
+    <div class="cw-wrap">
+      <div class="cw-toolbar">
+        <div class="cw-name">
+          <h2 id="cw-h">PatchManagement-Dashboard</h2>
+          <p id="cw-sub">Mirror of the CloudWatch dashboard · times in MYT (UTC+8)</p>
         </div>
-        <p class="status-line" id="status-line" role="status" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="status-text">Loading results…</span></p>
-      </div>
-    </div>
-  </section>
-
-  <section class="band" id="results" aria-labelledby="results-h">
-    <div class="wrap">
-      <div class="section-head">
-        <h2 id="results-h">Results</h2>
-        <p class="section-note" id="window-note"></p>
-      </div>
-      <div class="tiles" id="tiles"></div>
-    </div>
-  </section>
-
-  <section class="band" id="hosts" aria-labelledby="hosts-h">
-    <div class="wrap">
-      <div class="section-head">
-        <h2 id="hosts-h">Host status</h2>
-        <p class="section-note">Each host's latest patch run: missing updates before and after, and the run time against the 900 s Lambda limit. Installs run on the host, so a run can outlast a single Lambda call.</p>
-      </div>
-      <div class="hosts" id="host-cards"></div>
-    </div>
-  </section>
-
-  <section class="band" aria-label="Charts">
-    <div class="wrap charts">
-      <figure class="card" id="deploy-time">
-        <figcaption>
-          <h3>Deployment time per host run</h3>
-          <p class="section-note">Each dot is one host in one completed patch run (Experiment 1). Times in MYT.</p>
-        </figcaption>
-        <div class="legend" id="dur-legend"></div>
-        <div class="chart" id="dur-chart"></div>
-      </figure>
-      <figure class="card" id="severity">
-        <figcaption>
-          <h3>Updates fixed by severity</h3>
-          <p class="section-note">RHEL advisories and Windows KBs closed, counted from the rescan after each completed run.</p>
-        </figcaption>
-        <div class="sev" id="sev-chart"></div>
-        <div class="legend" id="sev-legend"></div>
-      </figure>
-    </div>
-  </section>
-
-  <section class="band" id="cycles" aria-labelledby="cycles-h">
-    <div class="wrap">
-      <div class="section-head">
-        <h2 id="cycles-h">Patch cycles</h2>
-        <p class="section-note">Every patch execution of <code>serverless-patch-cycle</code>. Select a column heading to sort.</p>
-      </div>
-      <div class="card table-card">
-        <div class="table-scroll">
-          <table class="cycles" id="cycle-table">
-            <thead>
-              <tr>
-                <th scope="col" aria-sort="descending"><button type="button" data-key="started">Started (MYT)</button></th>
-                <th scope="col"><button type="button" data-key="hosts">Hosts</button></th>
-                <th scope="col"><button type="button" data-key="result">Result</button></th>
-                <th scope="col" class="num narrow-hide"><button type="button" data-key="scope_pct">Scope</button></th>
-                <th scope="col" class="num"><button type="button" data-key="succeeded">Verified</button></th>
-                <th scope="col" class="num"><button type="button" data-key="attempted">Attempted</button></th>
-                <th scope="col" class="num"><button type="button" data-key="duration_s">Duration</button></th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+        <div class="cw-controls">
+          <div class="views" role="group" aria-label="Results to show">
+            <button type="button" id="view-live" aria-pressed="true"><span class="live-dot" aria-hidden="true"></span>Live</button>
+            <button type="button" id="view-evaluation" aria-pressed="false">Evaluation <span id="eval-range"></span></button>
+          </div>
+          <span class="cw-range" id="cw-range" title="Time range">Loading…</span>
+          <label class="cw-var" for="cw-host">Host <select id="cw-host"></select></label>
         </div>
       </div>
+      <p class="status-line" id="status-line" role="status" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="status-text">Loading results…</span></p>
+      <div class="cw-grid" id="cw-grid"></div>
     </div>
   </section>
 
@@ -151,11 +96,11 @@
 <footer class="foot">
   <div class="wrap foot-in">
     <p><strong>Centralized Agentless Patch Management using Serverless Orchestration for Multi-Platform Systems</strong><br>Final Year Project, Bachelor of Computer Science (Hons) Computer Networks, Universiti Teknologi MARA.</p>
-    <p class="foot-note" id="foot-note"><span id="source-note"></span> Figures are counted with the same rules as the <code>serverless-patch-metrics</code> Lambda. A failed run counts its updates as attempted with none fixed. Microsoft Defender updates are excluded from the Windows counts by design. Cost per cycle is estimated in CloudWatch from each execution's history and is not shown here.</p>
+    <p class="foot-note" id="foot-note"><span id="source-note"></span> The dashboard mirrors the CloudWatch dashboard PatchManagement-Dashboard: the coloured panels are the same HTML as its custom widgets, and every other widget is redrawn from the same records and metrics.</p>
   </div>
 </footer>
 
-<div class="tip" id="tip" hidden></div>
+<div class="cw-tip" id="tip" hidden></div>
 
 <script src="data/patch-data.js"></script>
 <script src="assets/app.js"></script>

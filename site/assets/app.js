@@ -1,40 +1,52 @@
-/* Renders patch results in two views:
-     Live        data/live.json, written by the serverless-patch-site-publisher Lambda after every
-                 cycle starts or ends; re-checked every 60 s while the page is open.
-     Evaluation  window.PATCH_DATA (data/patch-data.js), built from evidence/ by build_site_data.py
-                 for the reporting period; never changes on its own.
-   Same counting rules as lambda/summary_widget.py: success = verified fixed / attempted,
-   colours green from 90 %, amber from 80 %, red below (as the CloudWatch dashboard). */
+/* Mirror of the CloudWatch dashboard PatchManagement-Dashboard (dashboard/dashboard-v3.json).
+
+   Data (same format from every source, see lambda/site_publisher.py):
+     Live        data/live.json        written by serverless-patch-site-publisher when a cycle starts
+                                       or ends; re-checked every 60 s while the page is open
+     Evaluation  data/evaluation.json  same, for the fixed evaluation period
+                 window.PATCH_DATA     fallback built from evidence/ (no cost, no orchestration counts)
+
+   The three coloured panels are the HTML of summary_widget.py itself (shown in a shadow root).
+   Every other widget is redrawn here from the same records, following its Logs Insights query or
+   metric expression in dashboard-v3.json, with the CloudWatch chart palette. */
 (function () {
   'use strict';
 
-  var EVAL = window.PATCH_DATA && window.PATCH_DATA.cycles ? window.PATCH_DATA : null;
-  var LIVE_URL = 'data/live.json';
+  var FALLBACK = window.PATCH_DATA && Array.isArray(window.PATCH_DATA.records) ? window.PATCH_DATA : null;
   var POLL_MS = 60000;
-  var RATE_GOOD = 90, RATE_WARN = 80;
-  var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  var STATUS = {
-    patched: ['PATCHED', 'ok'], patched_partial: ['PARTIAL', 'warn'], failed: ['FAILED', 'bad'],
-    compliant: ['COMPLIANT', 'ok'], scanned: ['SCANNED', 'muted'], skipped: ['SKIPPED', 'muted'],
-  };
-  var RESULT_TONE = { PATCHED: 'ok', COMPLIANT: 'ok', PARTIAL: 'warn', FAILED: 'bad' };
-  var PLATFORM = { rhel: 'RHEL 9', windows: 'Windows Server 2022' };
-  var SEVERITIES = [
-    ['Critical', 'fixed_critical', '--sev-critical'], ['Important', 'fixed_important', '--sev-important'],
-    ['Moderate', 'fixed_moderate', '--sev-moderate'], ['Low', 'fixed_low', '--sev-low'],
-    ['Unrated', 'fixed_unrated', '--sev-unrated'],
-  ];
+  var LIMIT_S = 900;
+  var PALETTE = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'];
+  var GREEN = '#2ca02c', RED = '#d62728', ORANGE = '#ff7f0e', GREY = '#7f7f7f';
+  var PATCHED = { patched: 1, patched_partial: 1 };
   var SVG_NS = 'http://www.w3.org/2000/svg';
+  var LIMIT_LABEL = 'Lambda 15-min limit (900 s): installs run on the host';
+
+  // The dashboard layout, as in dashboard/dashboard-v3.json (x, y, width, height on a 24-column grid).
+  var LAYOUT = [
+    { id: 'header', x: 0, y: 0, w: 24, h: 3, type: 'text' },
+    { id: 'kpi', x: 0, y: 3, w: 24, h: 4, type: 'custom', title: 'Patch Summary' },
+    { id: 'hosts', x: 0, y: 7, w: 16, h: 7, type: 'custom', title: 'Host Status: latest patch run per host' },
+    { id: 'severity', x: 16, y: 7, w: 8, h: 7, type: 'custom', title: 'Updates Fixed by Severity (verified by rescan)' },
+    { id: 'hostGauge', x: 0, y: 14, w: 5, h: 6, title: 'Selected host {host}: success rate' },
+    { id: 'hostTime', x: 5, y: 14, w: 9, h: 6, title: 'Selected host {host}: deployment time per run (s)' },
+    { id: 'hostHistory', x: 14, y: 14, w: 10, h: 6, title: 'Selected host {host}: run history', table: true },
+    { id: 'barHost', x: 0, y: 20, w: 8, h: 7, title: 'Patch Deployment Time per Host (Experiment 1, longest run in range, s)' },
+    { id: 'timeAll', x: 8, y: 20, w: 16, h: 7, title: 'Deployment Time per Run (each point is one host in one patch run, s)' },
+    { id: 'pie', x: 0, y: 27, w: 6, h: 7, title: 'Host Outcomes (patch runs)' },
+    { id: 'exp3', x: 6, y: 27, w: 9, h: 7, title: 'Scalability Across Multiple Hosts (Experiment 3, RHEL full-scope runs, x = hosts in run)' },
+    { id: 'orch', x: 15, y: 27, w: 9, h: 7, title: 'Orchestration Layer (Step Functions, Lambda, SNS)' },
+    { id: 'perDay', x: 0, y: 34, w: 12, h: 6, title: 'Step Functions Executions per Day' },
+    { id: 'platform', x: 12, y: 34, w: 12, h: 6, title: 'Success Rate by Platform (from CloudWatch Logs)', table: true },
+    { id: 'costSv', x: 0, y: 40, w: 6, h: 6, title: 'Estimated Operational Cost (Experiment 4, USD)' },
+    { id: 'costTable', x: 6, y: 40, w: 18, h: 6, title: 'Cost per Cycle (list price before free tier)', table: true },
+    { id: 'latest', x: 0, y: 46, w: 24, h: 7, title: 'Latest Host Results (scan and patch runs)', table: true },
+    { id: 'footer', x: 0, y: 53, w: 24, h: 2, type: 'text', plain: true },
+  ];
 
   var state = {
-    view: null,          // 'live' | 'evaluation'
-    live: null,          // last live.json that loaded
-    liveText: '',        // its raw text, to tell a new publish from the same one
-    liveFailed: false,
-    data: null,          // what is drawn now
-    sortKey: 'started', sortDir: -1,
-    hostColour: {},
-    redraw: null,
+    view: null, data: null, host: null,
+    live: null, liveText: '', evaluation: null,
+    redrawTimer: null,
   };
 
   // ------------------------------------------------------------ helpers
@@ -45,26 +57,28 @@
     if (text != null) n.textContent = text;
     return n;
   }
-  function svg(tag, attrs) {
+  function svg(tag, attrs, text) {
     var n = document.createElementNS(SVG_NS, tag);
     for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (text != null) n.textContent = text;
     return n;
   }
   function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
-  var nf = new Intl.NumberFormat('en');
-  var nf1 = new Intl.NumberFormat('en', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  function mytDate(iso) { return new Date(Date.parse(iso) + 8 * 3600e3); } // read with UTC getters = MYT
-  function pad(n) { return String(n).padStart(2, '0'); }
-  function mytDay(iso) { var d = mytDate(iso); return d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()] + ' ' + d.getUTCFullYear(); }
-  function mytStamp(iso) { var d = mytDate(iso); return d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()] + ', ' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()); }
-  function mytClock(iso) { var d = mytDate(iso); return pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()); }
-  function dayLabel(ymd) { var p = ymd.split('-'); return Number(p[2]) + ' ' + MONTHS[Number(p[1]) - 1] + ' ' + p[0]; }
-  function dur(s) {
-    s = Math.round(s);
-    if (s < 60) return s + 's';
-    var m = Math.floor(s / 60);
-    return m + 'm ' + pad(s % 60) + 's';
+  function isDark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t) return t === 'dark';
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
   }
+  function pad(n, w) { return String(n).padStart(w || 2, '0'); }
+  function tsMs(ts) { return Date.parse(String(ts).replace(' ', 'T') + (/[zZ+]/.test(String(ts).slice(10)) ? '' : 'Z')); }
+  function myt(ms) { return new Date(ms + 8 * 3600e3); }                  // read with UTC getters
+  function stamp(ts) {                                                    // Logs Insights format, in MYT
+    var ms = tsMs(ts); if (isNaN(ms)) return '';
+    var d = myt(ms);
+    return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()) + ' ' +
+      pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds()) + '.' + pad(d.getUTCMilliseconds(), 3);
+  }
+  function clock(iso) { var d = myt(Date.parse(iso)); return pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()); }
   function ago(iso) {
     var s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
     if (s < 90) return 'just now';
@@ -72,24 +86,37 @@
     if (s < 48 * 3600) return Math.round(s / 3600) + ' h ago';
     return Math.round(s / 86400) + ' days ago';
   }
-  function tone(pct) { return pct == null ? '' : pct >= RATE_GOOD ? 'tone-ok' : pct >= RATE_WARN ? 'tone-warn' : 'tone-bad'; }
-  function isDone(r) { return r.status === 'patched' || r.status === 'patched_partial'; }
-  function rate(rows) {
-    var ok = 0, att = 0, n = 0;
-    rows.forEach(function (r) { ok += r.succeeded; att += r.attempted; if (r.attempted > 0) n += 1; });
-    return { pct: att ? 100 * ok / att : null, ok: ok, att: att, runs: n };
+  function num(v) { return typeof v === 'number' && isFinite(v) ? v : 0; }
+  function short(h) { return String(h || '').replace('serverless-patch-', ''); }
+  function cell(v) {                                                      // a Logs Insights table value
+    if (v == null || v === '') return '';
+    if (typeof v === 'number') return Number.isInteger(v) ? String(v) : String(Math.round(v * 10000) / 10000);
+    return String(v);
   }
-  function evalRange() {
-    var w = (EVAL && EVAL.window) || {};
-    if (!w.from || !w.to) return '';
-    var a = w.from.split('-'), b = w.to.split('-');
-    if (a[0] === b[0] && a[1] === b[1]) return Number(a[2]) + '–' + Number(b[2]) + ' ' + MONTHS[Number(a[1]) - 1];
-    return dayLabel(w.from) + ' – ' + dayLabel(w.to);
+  function single(v) {                                                    // a single-value widget number
+    if (v == null || !isFinite(v)) return '–';
+    if (Number.isInteger(v)) return v.toLocaleString('en');
+    if (Math.abs(v) < 1) return String(Number(v.toPrecision(3)));
+    return v.toLocaleString('en', { maximumFractionDigits: 2 });
   }
-  function latestPerHost(runs) {
-    var latest = {};
-    runs.forEach(function (r) { if (!latest[r.host] || r.started > latest[r.host].started) latest[r.host] = r; });
-    return Object.keys(latest).map(function (k) { return latest[k]; })
+  function niceMax(v) {
+    if (v <= 0) return 1;
+    var p = Math.pow(10, Math.floor(Math.log10(v))), m = v / p;
+    return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * p;
+  }
+  function ticks(max, n) { var out = [], step = max / n; for (var i = 0; i <= n; i++) out.push(Math.round(step * i * 1000) / 1000); return out; }
+
+  // ------------------------------------------------------------ records (Logs Insights equivalents)
+  function hostRecs(d) { return (d.records || []).filter(function (r) { return r.record === 'host'; }); }
+  function cycleRecs(d) { return (d.records || []).filter(function (r) { return r.record === 'cycle'; }); }
+  function emfHost(r) {   // records that produce the PatchesAttempted / PatchesSucceeded metrics
+    return r.record === 'host' && r.mode === 'patch' && (PATCHED[r.status] || r.status === 'failed') && r.host && r.platform;
+  }
+  function hostSeconds(r) { return r.record === 'host' && r.mode === 'patch' && PATCHED[r.status] && r.host && r.platform; }
+  function hostList(d) {
+    var seen = {};
+    hostRecs(d).forEach(function (r) { if (r.host && !seen[r.host]) seen[r.host] = r.platform || ''; });
+    return Object.keys(seen).map(function (h) { return { host: h, platform: seen[h] }; })
       .sort(function (a, b) { return (a.platform + a.host).localeCompare(b.platform + b.host); });
   }
 
@@ -105,439 +132,484 @@
     });
     tip.hidden = false;
     var w = tip.offsetWidth, h = tip.offsetHeight;
-    var left = Math.min(Math.max(8 + window.scrollX, x - w / 2), window.scrollX + document.documentElement.clientWidth - w - 8);
-    tip.style.left = left + 'px';
-    tip.style.top = (y - h - 14) + 'px';
+    tip.style.left = Math.min(Math.max(8 + window.scrollX, x - w / 2), window.scrollX + document.documentElement.clientWidth - w - 8) + 'px';
+    tip.style.top = (y - h - 12) + 'px';
   }
   function hideTip() { tip.hidden = true; }
-
-  // ------------------------------------------------------------ status line
-  function periodLabels(data) {
-    var starts = (data.cycles || []).map(function (c) { return c.started; }).sort();
-    var first = starts.length ? mytDay(starts[0]) : '', last = starts.length ? mytDay(starts[starts.length - 1]) : '';
-    var w = data.window || {};
-    if (w.from) first = dayLabel(w.from);
-    if (w.to) last = dayLabel(w.to);
-    return { first: first, last: last };
-  }
-  function drawStatus() {
-    var data = state.data;
-    var line = $('status-line'), text = $('status-text');
-    line.classList.remove('is-ok', 'is-warn', 'is-running');
-    if (!data) { text.textContent = 'No results to show yet.'; return; }
-    var latest = latestPerHost(data.host_runs || []);
-    var clean = latest.filter(function (r) { return r.after === 0; }).length;
-    var st = data.status || {};
-    if (state.view === 'live' && st.state === 'running') {
-      line.classList.add('is-running');
-      text.textContent = (st.mode === 'patch' ? 'Patch cycle' : 'Scan') + ' in progress · started ' + mytClock(st.since) +
-        ' MYT (' + ago(st.since) + ')' + (st.count > 1 ? ' · ' + st.count + ' runs' : '') + ' · this page updates when it finishes';
-      return;
-    }
-    if (!latest.length) {
-      text.textContent = state.view === 'live'
-        ? 'No patch cycles in the last ' + ((data.window || {}).days || 30) + ' days · updated ' + ago(data.generated_at)
-        : 'No patch cycles in this period.';
-      return;
-    }
-    line.classList.add(clean === latest.length ? 'is-ok' : 'is-warn');
-    var base = 'Latest run on each host: ' + clean + ' of ' + latest.length + ' hosts with no missing updates';
-    if (state.view === 'live') {
-      text.textContent = base + ' · updated ' + ago(data.generated_at);
-    } else {
-      var p = periodLabels(data);
-      text.textContent = base + ' · results ' + p.first + ' to ' + p.last;
-    }
+  function tipAt(node, lines) {
+    function show() { var b = node.getBoundingClientRect(); showTip(lines, b.left + window.scrollX + b.width / 2, b.top + window.scrollY); }
+    node.addEventListener('pointerenter', show);
+    node.addEventListener('pointerleave', hideTip);
   }
 
-  // ------------------------------------------------------------ host colours (stable across redraws)
-  function colourName(host, platform) {
-    var hc = state.hostColour;
-    if (!hc[host]) {
-      var used = Object.keys(hc).filter(function (h) { return hc[h].platform === platform; }).length;
-      hc[host] = { platform: platform, name: platform === 'windows' ? '--win' : (used === 0 ? '--rhel' : '--rhel-2') };
-    }
-    return hc[host].name;
+  // ------------------------------------------------------------ chart frame
+  function frame(body, opts) {
+    var wrap = el('div', 'cw-chart');
+    body.appendChild(wrap);
+    var legend = opts.legend ? el('div', 'cw-legend') : null;
+    var W = Math.max(200, body.clientWidth - 32), H = Math.max(140, body.clientHeight - 16 - (legend ? 26 : 0));
+    var s = svg('svg', { viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, role: 'img', 'aria-label': opts.label || '' });
+    wrap.appendChild(s);
+    if (legend) wrap.appendChild(legend);
+    return { svg: s, W: W, H: H, legend: legend };
   }
-  function colourFor(host, platform) { return css(colourName(host, platform)); }
-
-  // ------------------------------------------------------------ full render
-  function render(data) {
-    state.data = data;
-    hideTip();
-    var runs = data.host_runs || [];
-    var cycles = data.cycles || [];
-    var LIMIT = data.lambda_limit_s || 900;
-    var live = state.view === 'live';
-
-    $('results-h').textContent = live ? 'Live results' : 'Evaluation results';
-    var days = (data.window || {}).days || 30;
-    var p = periodLabels(data);
-    $('window-note').textContent = live
-      ? cycles.length + ' patch cycles and ' + runs.length + ' host runs in the last ' + days + ' days (times in MYT). ' +
-        'Updates automatically when a patch cycle starts or finishes. Success counts only updates the post-install rescan confirmed as fixed.'
-      : cycles.length + ' patch cycles and ' + runs.length + ' host runs between ' + p.first + ' and ' + p.last +
-        ' (MYT). Success counts only updates the post-install rescan confirmed as fixed.';
-    $('source-note').textContent = live
-      ? 'Live results come from the records the serverless-patch-metrics Lambda writes after every cycle, published here by the serverless-patch-site-publisher Lambda.'
-      : 'Evaluation results come from the cycle results in the repository\'s evidence/ folder' + (data.commit ? ' (commit ' + data.commit + ').' : '.');
-
-    ['tiles', 'host-cards', 'dur-legend', 'dur-chart', 'sev-chart', 'sev-legend'].forEach(function (id) { $(id).replaceChildren(); });
-    $('cycle-table').tBodies[0].replaceChildren();
-    drawStatus();
-
-    if (!cycles.length) {
-      var msg = live ? 'No patch cycles in the last ' + days + ' days yet.' : 'No patch cycles in this period.';
-      $('tiles').appendChild(el('p', 'empty', msg));
-      $('host-cards').appendChild(el('p', 'empty', 'Host results appear after the first patch cycle.'));
-      $('dur-chart').appendChild(el('p', 'empty', 'No completed host runs to chart.'));
-      $('sev-chart').appendChild(el('p', 'empty', 'No completed host runs to chart.'));
-      var tr = el('tr'); var td = el('td', 'empty', msg); td.colSpan = 7; tr.appendChild(td);
-      $('cycle-table').tBodies[0].appendChild(tr);
-      state.redraw = null;
-      return;
-    }
-
-    // ---------------- tiles
-    var overall = rate(runs);
-    var rhel = rate(runs.filter(function (r) { return r.platform === 'rhel'; }));
-    var windows = rate(runs.filter(function (r) { return r.platform === 'windows'; }));
-    var latestRows = latestPerHost(runs);
-    var done = runs.filter(isDone);
-    var failedHostRuns = cycles.reduce(function (a, c) { return a + c.failed; }, 0);
-    var avgCycleMin = cycles.reduce(function (a, c) { return a + c.duration_s; }, 0) / cycles.length / 60;
-    var longest = done.length ? Math.max.apply(null, done.map(function (r) { return r.duration_s; })) : null;
-
-    function rateTile(label, r, unit) {
-      var t = el('div', 'tile ' + tone(r.pct));
-      t.appendChild(el('p', 'tile-label', label));
-      var v = el('p', 'tile-value', r.pct == null ? '–' : nf1.format(r.pct));
-      if (r.pct != null) v.appendChild(el('small', null, '%'));
-      t.appendChild(v);
-      var m = el('div', 'meter');
-      m.setAttribute('aria-hidden', 'true');
-      var fill = el('span'); fill.style.width = (r.pct || 0).toFixed(1) + '%';
-      var mark = el('i'); mark.style.left = RATE_GOOD + '%'; mark.title = 'Green from ' + RATE_GOOD + '%';
-      m.appendChild(fill); m.appendChild(mark);
-      t.appendChild(m);
-      t.appendChild(el('p', 'tile-sub', r.att ? nf.format(r.ok) + ' of ' + nf.format(r.att) + ' ' + unit + ' verified · ' + r.runs + ' host runs' : 'No updates attempted'));
-      return t;
-    }
-    function plainTile(label, value, unit, sub) {
-      var t = el('div', 'tile');
-      t.appendChild(el('p', 'tile-label', label));
-      var v = el('p', 'tile-value', value);
-      if (unit) v.appendChild(el('small', null, unit));
-      t.appendChild(v);
-      t.appendChild(el('p', 'tile-sub', sub));
-      return t;
-    }
-    var tiles = $('tiles');
-    tiles.appendChild(rateTile('Overall success rate', overall, 'updates'));
-    tiles.appendChild(rateTile('RHEL 9 success rate', rhel, 'RHSA'));
-    tiles.appendChild(rateTile('Windows success rate', windows, 'KB'));
-    tiles.appendChild(plainTile('Patch cycles', String(cycles.length), '', failedHostRuns + ' failed host runs'));
-    tiles.appendChild(plainTile('Average cycle time', nf1.format(avgCycleMin), 'min', 'From trigger to verified result'));
-    tiles.appendChild(longest == null ? plainTile('Longest host run', '–', '', 'No completed host runs')
-      : plainTile('Longest host run', nf1.format(longest / 60), 'min',
-        longest > LIMIT ? 'Past the 15-min Lambda limit, so installs run on the host' : 'Within the 15-min Lambda limit'));
-
-    // ---------------- host cards
-    latestRows.forEach(function (r) { colourName(r.host, r.platform); });
-    var cards = $('host-cards');
-    var barScale = Math.max.apply(null, [LIMIT * 2].concat(latestRows.map(function (r) { return r.duration_s * 1.1; })));
-    latestRows.forEach(function (r) {
-      var st = STATUS[r.status] || [String(r.status).toUpperCase(), 'muted'];
-      var card = el('article', 'host');
-      card.style.setProperty('--plat', 'var(' + colourName(r.host, r.platform) + ')');
-      var top = el('div', 'host-top');
-      top.appendChild(el('span', 'host-name', r.host));
-      top.appendChild(el('span', 'chip ' + st[1], st[0]));
-      card.appendChild(top);
-      card.appendChild(el('p', 'host-meta', (PLATFORM[r.platform] || r.platform) + ' · ' + r.workload + ' · ' + mytStamp(r.started) + ' MYT'));
-      var big = el('p', 'host-big', r.status === 'failed' || r.after == null ? String(r.before) : r.before + ' → ' + r.after);
-      big.appendChild(el('small', null, r.unit + ' missing'));
-      card.appendChild(big);
-      card.appendChild(el('p', 'host-row', r.status === 'failed'
-        ? 'Failed at ' + (r.failed_at || 'an unknown step')
-        : nf.format(r.succeeded) + ' of ' + nf.format(r.attempted) + ' verified fixed'));
-      var bar = el('div', 'runbar');
-      bar.setAttribute('role', 'img');
-      bar.setAttribute('aria-label', 'Run time ' + dur(r.duration_s) + ' against the ' + LIMIT + ' second Lambda limit');
-      var fill = el('span');
-      fill.style.width = Math.min(100, 100 * r.duration_s / barScale).toFixed(1) + '%';
-      fill.style.background = r.duration_s > LIMIT ? 'var(--bad)' : 'var(--ok)';
-      var lim = el('i'); lim.style.left = (100 * LIMIT / barScale).toFixed(1) + '%';
-      bar.appendChild(fill); bar.appendChild(lim);
-      card.appendChild(bar);
-      var timing = el('div', 'host-row');
-      timing.appendChild(el('span', null, dur(r.duration_s) + ' run time'));
-      timing.appendChild(el('span', null, '| ' + LIMIT + ' s Lambda limit'));
-      card.appendChild(timing);
-      var flags = el('div', 'flags');
-      if (r.rebooted != null) flags.appendChild(el('span', 'flag' + (r.rebooted ? ' good' : ''), r.rebooted ? 'Rebooted' : 'No reboot needed'));
-      if (r.healthy != null) flags.appendChild(el('span', 'flag ' + (r.healthy ? 'good' : 'bad'), r.healthy ? 'Workload healthy' : 'Workload not healthy'));
-      card.appendChild(flags);
-      cards.appendChild(card);
+  function yAxis(f, max, left, top, bottom, label) {
+    var tv = ticks(max, 4), H = f.H;
+    function y(v) { return H - bottom - v / max * (H - bottom - top); }
+    tv.forEach(function (t) {
+      f.svg.appendChild(svg('line', { x1: left, x2: f.W - 6, y1: y(t), y2: y(t), stroke: css('--cw-grid'), 'stroke-width': 1 }));
+      f.svg.appendChild(svg('text', { x: left - 6, y: y(t), dy: '0.32em', 'text-anchor': 'end' }, t.toLocaleString('en')));
     });
-
-    // ---------------- deployment time chart
-    var hosts = Array.from(new Set(done.map(function (r) { return r.host; }))).sort();
-    var legend = $('dur-legend');
-    hosts.forEach(function (h) {
-      var name = colourName(h, (done.filter(function (r) { return r.host === h; })[0] || {}).platform);
-      var s = el('span'); var i = el('i');
-      if (name === '--rhel-2') i.style.border = '2px solid var(--rhel-2)';
-      else i.style.background = 'var(' + name + ')';
-      s.appendChild(i); s.appendChild(document.createTextNode(h));
-      legend.appendChild(s);
-    });
-    var limLegend = el('span'); var li = el('i', 'sq'); li.style.cssText = 'height:2px;background:var(--bad)';
-    limLegend.appendChild(li); limLegend.appendChild(document.createTextNode('15-min Lambda limit'));
-    legend.appendChild(limLegend);
-
-    function niceMax(v) {
-      var steps = [5, 10, 15, 20, 25, 30, 40, 50, 60, 90, 120];
-      for (var i = 0; i < steps.length; i++) if (steps[i] >= v) return steps[i];
-      return Math.ceil(v / 30) * 30;
+    if (label) f.svg.appendChild(svg('text', { x: 10, y: (top + H - bottom) / 2, transform: 'rotate(-90 10 ' + ((top + H - bottom) / 2) + ')', 'text-anchor': 'middle' }, label));
+    return y;
+  }
+  function leftMargin(f, max, label) {
+    var probe = svg('text', {}, ticks(max, 4).slice(-1)[0].toLocaleString('en')); f.svg.appendChild(probe);
+    var w = probe.getComputedTextLength(); f.svg.removeChild(probe);
+    return Math.ceil(w) + 12 + (label ? 16 : 0);
+  }
+  function annotation(f, y, x0, x1, value, colour, text) {
+    f.svg.appendChild(svg('line', { x1: x0, x2: x1, y1: y(value), y2: y(value), stroke: colour, 'stroke-width': 1.5 }));
+    if (text) {
+      var t = svg('text', { x: x0 + 4, y: y(value) - 5 }, text); t.style.fill = colour; f.svg.appendChild(t);
     }
-    function drawDurations() {
-      var box = $('dur-chart');
-      box.replaceChildren();
-      if (!done.length) { box.appendChild(el('p', 'empty', 'No completed host runs to chart.')); return; }
-      var W = Math.max(280, box.clientWidth), H = 270;
-      var top = 10, bottom = 28;
-      var yMax = niceMax(Math.max(LIMIT / 60 * 1.1, Math.max.apply(null, done.map(function (r) { return r.duration_s / 60; })) * 1.05));
-      var tickStep = yMax <= 30 ? 5 : 10;
-      var ticks = []; for (var t = 0; t <= yMax; t += tickStep) ticks.push(t);
-      var s = svg('svg', { viewBox: '0 0 ' + W + ' ' + H, role: 'img', 'aria-label': 'Deployment time per host run, in minutes' });
-      box.appendChild(s);
-      var probe = svg('text', {}); probe.textContent = yMax + ' min'; s.appendChild(probe);
-      var left = Math.ceil(probe.getComputedTextLength()) + 12; s.removeChild(probe);
-      var right = W - 10;
-      var times = done.map(function (r) { return mytDate(r.started).getTime(); });
-      var dayMs = 864e5;
-      var t0 = Math.floor(Math.min.apply(null, times) / dayMs) * dayMs;
-      var t1 = Math.ceil(Math.max.apply(null, times) / dayMs) * dayMs;
-      if (t1 <= t0) t1 = t0 + dayMs;
-      function x(tv) { return left + (tv - t0) / (t1 - t0) * (right - left); }
-      function y(m) { return H - bottom - m / yMax * (H - bottom - top); }
-
-      ticks.forEach(function (tv) {
-        s.appendChild(svg('line', { x1: left, x2: right, y1: y(tv), y2: y(tv), stroke: css('--grid') }));
-        var lab = svg('text', { x: left - 8, y: y(tv), dy: '0.32em', 'text-anchor': 'end' });
-        lab.textContent = tv + ' min'; s.appendChild(lab);
-      });
-      var days = (t1 - t0) / dayMs;
-      var every = Math.max(1, Math.ceil(52 / ((right - left) / days)));
-      for (var d = 0; d <= days; d += every) {
-        var td = t0 + d * dayMs, dt = new Date(td);
-        s.appendChild(svg('line', { x1: x(td), x2: x(td), y1: H - bottom, y2: H - bottom + 4, stroke: css('--line') }));
-        var xl = svg('text', { x: x(td), y: H - 8, 'text-anchor': d === 0 ? 'start' : (td === t1 ? 'end' : 'middle') });
-        xl.textContent = dt.getUTCDate() + ' ' + MONTHS[dt.getUTCMonth()]; s.appendChild(xl);
-      }
-      s.appendChild(svg('line', { x1: left, x2: right, y1: y(0), y2: y(0), stroke: css('--muted'), 'stroke-opacity': 0.5 }));
-      s.appendChild(svg('line', { x1: left, x2: right, y1: y(LIMIT / 60), y2: y(LIMIT / 60), stroke: css('--bad'), 'stroke-width': 1.5, 'stroke-dasharray': '6 4' }));
-
-      var dots = [];
-      done.forEach(function (r, i) {
-        // rhel-01 and rhel-02 run in the same cycle with near-identical times, so the second
-        // RHEL host is drawn as a ring to stay visible on top of the first.
-        var ring = colourName(r.host, r.platform) === '--rhel-2';
-        var colour = colourFor(r.host, r.platform);
-        var c = svg('circle', ring
-          ? { cx: x(times[i]), cy: y(r.duration_s / 60), r: 5.5, fill: 'none', 'fill-opacity': 0.88, stroke: colour, 'stroke-width': 2.25 }
-          : { cx: x(times[i]), cy: y(r.duration_s / 60), r: 5.5, fill: colour, 'fill-opacity': 0.88, stroke: css('--surface'), 'stroke-width': 1.5 });
-        s.appendChild(c);
-        dots.push({ node: c, r: r, cx: x(times[i]), cy: y(r.duration_s / 60) });
-      });
-
-      function nearest(ev) {
-        var pt = s.getBoundingClientRect(); var k = W / pt.width;
-        var px = (ev.clientX - pt.left) * k, py = (ev.clientY - pt.top) * k;
-        var best = null, bd = Infinity;
-        dots.forEach(function (dd) { var q = (dd.cx - px) * (dd.cx - px) + (dd.cy - py) * (dd.cy - py); if (q < bd) { bd = q; best = dd; } });
-        return bd < 40 * 40 * k * k ? { d: best, k: k, rect: pt } : null;
-      }
-      s.addEventListener('pointermove', function (ev) {
-        var hit = nearest(ev);
-        dots.forEach(function (dd) { dd.node.setAttribute('r', hit && dd === hit.d ? 7.5 : 5.5); dd.node.setAttribute('fill-opacity', hit && dd !== hit.d ? 0.3 : 0.88); });
-        if (!hit) { hideTip(); return; }
-        var r = hit.d.r;
-        showTip([
-          { text: mytStamp(r.started) + ' MYT' },
-          { text: r.host + ' · ' + dur(r.duration_s) + ' · ' + (STATUS[r.status] || [r.status])[0], colour: colourFor(r.host, r.platform) },
-          { text: r.before + ' → ' + r.after + ' ' + r.unit + ' missing' + (r.scope_pct < 100 ? ' · ' + r.scope_pct + '% scope' : '') },
-        ], hit.rect.left + window.scrollX + hit.d.cx / hit.k, hit.rect.top + window.scrollY + hit.d.cy / hit.k);
-      });
-      s.addEventListener('pointerleave', function () {
-        hideTip();
-        dots.forEach(function (dd) { dd.node.setAttribute('r', 5.5); dd.node.setAttribute('fill-opacity', 0.88); });
-      });
+  }
+  function legendItem(f, colour, text, square) {
+    var s = el('span'); var i = el('i', square ? 'sq' : null); i.style.background = colour;
+    s.appendChild(i); s.appendChild(document.createTextNode(text)); f.legend.appendChild(s);
+  }
+  function timeAxis(f, start, end, left, right, bottom) {
+    function x(ms) { return left + (ms - start) / (end - start) * (right - left); }
+    var span = end - start, day = 864e5;
+    var stepDays = Math.max(1, Math.ceil((span / day) / Math.max(1, Math.floor((right - left) / 56))));
+    var d0 = myt(start); var first = Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth(), d0.getUTCDate()) - 8 * 3600e3;
+    if (first < start) first += day;
+    for (var t = first; t <= end; t += stepDays * day) {
+      var d = myt(t);
+      f.svg.appendChild(svg('line', { x1: x(t), x2: x(t), y1: f.H - bottom, y2: f.H - bottom + 4, stroke: css('--cw-axis') }));
+      f.svg.appendChild(svg('text', { x: x(t), y: f.H - bottom + 16, 'text-anchor': 'middle' }, pad(d.getUTCMonth() + 1) + '/' + pad(d.getUTCDate())));
     }
-
-    // ---------------- severity chart
-    function drawSeverity() {
-      var box = $('sev-chart');
-      box.replaceChildren();
-      if (!done.length) { box.appendChild(el('p', 'empty', 'No completed host runs to chart.')); return; }
-      var by = {};
-      done.forEach(function (r) {
-        var pl = by[r.platform] || (by[r.platform] = { runs: 0 });
-        pl.runs += 1;
-        SEVERITIES.forEach(function (sv) { pl[sv[1]] = (pl[sv[1]] || 0) + (r[sv[1]] || 0); });
-      });
-      Object.keys(by).sort().forEach(function (plat) {
-        var pl = by[plat];
-        var total = SEVERITIES.reduce(function (a, sv) { return a + pl[sv[1]]; }, 0);
-        var row = el('div', 'sev-row');
-        row.appendChild(el('span', 'sev-name', plat === 'rhel' ? 'RHEL 9' : 'Windows'));
-        var stack = el('div', 'sev-stack');
-        SEVERITIES.forEach(function (sv) {
-          var v = pl[sv[1]];
-          if (!total || !v) return;
-          var share = 100 * v / total;
-          var seg = el('div', 'sev-seg', share >= 9 ? nf.format(v) : '');
-          seg.style.width = share.toFixed(2) + '%';
-          seg.style.background = 'var(' + sv[2] + ')';
-          seg.tabIndex = 0;
-          var lines = [{ text: plat === 'rhel' ? 'RHEL 9' : 'Windows' }, { text: sv[0] + ': ' + nf.format(v) + ' (' + nf1.format(share) + '%)', colour: css(sv[2]) }];
-          seg.setAttribute('aria-label', sv[0] + ' ' + v);
-          function show() { var b = seg.getBoundingClientRect(); showTip(lines, b.left + window.scrollX + b.width / 2, b.top + window.scrollY); }
-          seg.addEventListener('pointerenter', show); seg.addEventListener('focus', show);
-          seg.addEventListener('pointerleave', hideTip); seg.addEventListener('blur', hideTip);
-          stack.appendChild(seg);
-        });
-        row.appendChild(stack);
-        row.appendChild(el('span', 'sev-tot', nf.format(total)));
-        row.appendChild(el('span', 'sev-sub', pl.runs + ' completed host runs · ' + (plat === 'rhel' ? 'advisories (RHSA)' : 'KB updates')));
-        box.appendChild(row);
-      });
-      var lg = $('sev-legend');
-      lg.replaceChildren();
-      SEVERITIES.forEach(function (sv) {
-        var sp = el('span'); var i = el('i', 'sq'); i.style.background = 'var(' + sv[2] + ')';
-        sp.appendChild(i); sp.appendChild(document.createTextNode(sv[0])); lg.appendChild(sp);
-      });
-    }
-
-    state.redraw = drawDurations;
-    drawDurations();
-    drawSeverity();
-    drawTable();
+    f.svg.appendChild(svg('line', { x1: left, x2: right, y1: f.H - bottom, y2: f.H - bottom, stroke: css('--cw-axis') }));
+    return x;
   }
 
-  // ------------------------------------------------------------ cycles table (sort survives redraws)
-  var table = $('cycle-table');
-  function drawTable() {
-    var cycles = (state.data && state.data.cycles) || [];
-    if (!cycles.length) return;
-    var key = state.sortKey, dir = state.sortDir;
-    var rows = cycles.slice().sort(function (a, b) {
-      var va = a[key], vb = b[key];
-      if (Array.isArray(va)) { va = va.join(' '); vb = vb.join(' '); }
-      if (typeof va === 'number') return (va - vb) * dir;
-      return String(va).localeCompare(String(vb)) * dir;
+  // ------------------------------------------------------------ widget bodies
+  function note(body, text) { body.appendChild(el('p', 'cw-note', text)); }
+
+  function lineChart(body, series, opts) {      // series: [{name, colour, points:[{t, v, r}]}]
+    var all = []; series.forEach(function (s) { all = all.concat(s.points); });
+    if (!all.length) { note(body, 'No data available.'); return; }
+    var f = frame(body, { legend: opts.legend, label: opts.label });
+    var max = niceMax(Math.max(LIMIT_S * 1.08, Math.max.apply(null, all.map(function (p) { return p.v; })) * 1.05));
+    var left = leftMargin(f, max, opts.yLabel), top = 14, bottom = 22, right = f.W - 6;
+    var y = yAxis(f, max, left, top, bottom, opts.yLabel);
+    var x = timeAxis(f, opts.start, opts.end, left, right, bottom);
+    annotation(f, y, left, right, LIMIT_S, RED, LIMIT_LABEL);
+    var dots = [];
+    series.forEach(function (s) {
+      var pts = s.points.slice().sort(function (a, b) { return a.t - b.t; });
+      if (pts.length > 1) f.svg.appendChild(svg('polyline', { points: pts.map(function (p) { return x(p.t) + ',' + y(p.v); }).join(' '), fill: 'none', stroke: s.colour, 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+      pts.forEach(function (p) {
+        var c = svg('circle', { cx: x(p.t), cy: y(p.v), r: 3, fill: s.colour });
+        f.svg.appendChild(c); dots.push({ c: c, p: p, s: s, cx: x(p.t), cy: y(p.v) });
+      });
+      if (f.legend) legendItem(f, s.colour, s.name);
     });
-    var body = table.tBodies[0];
-    body.replaceChildren();
-    rows.forEach(function (c) {
+    hover(f, dots, function (d) {
+      return [{ text: stamp(d.p.ts) }, { text: d.s.name + ': ' + d.p.v.toLocaleString('en') + ' s', colour: d.s.colour }];
+    });
+  }
+  function hover(f, dots, lines) {
+    f.svg.addEventListener('pointermove', function (ev) {
+      var b = f.svg.getBoundingClientRect(), k = f.W / b.width;
+      var px = (ev.clientX - b.left) * k, py = (ev.clientY - b.top) * k, best = null, bd = 900 * k * k;
+      dots.forEach(function (d) { var q = (d.cx - px) * (d.cx - px) + (d.cy - py) * (d.cy - py); if (q < bd) { bd = q; best = d; } });
+      dots.forEach(function (d) { d.c.setAttribute('r', d === best ? 5 : 3); });
+      if (!best) { hideTip(); return; }
+      showTip(lines(best), b.left + window.scrollX + best.cx / k, b.top + window.scrollY + best.cy / k);
+    });
+    f.svg.addEventListener('pointerleave', function () { hideTip(); dots.forEach(function (d) { d.c.setAttribute('r', 3); }); });
+  }
+
+  function barChart(body, groups, seriesNames, opts) {  // groups: [{label, values:[...]}]
+    if (!groups.length) { note(body, 'No data available.'); return; }
+    var f = frame(body, { legend: true, label: opts.label });
+    var vals = []; groups.forEach(function (g) { vals = vals.concat(g.values); });
+    var max = niceMax(Math.max(opts.limit ? LIMIT_S * 1.08 : 0, Math.max.apply(null, vals) * 1.05));
+    var left = leftMargin(f, max, opts.yLabel), top = 14, bottom = opts.xLabels ? 22 : 8, right = f.W - 6;
+    var y = yAxis(f, max, left, top, bottom, opts.yLabel);
+    var gw = (right - left) / groups.length, n = seriesNames.length;
+    var bw = Math.min(56, (gw * 0.7) / n);
+    groups.forEach(function (g, gi) {
+      var gx = left + gi * gw + (gw - bw * n) / 2;
+      g.values.forEach(function (v, si) {
+        var colour = opts.colours ? opts.colours[gi] : PALETTE[si % PALETTE.length];
+        var r = svg('rect', { x: gx + si * bw, y: y(v), width: Math.max(1, bw - 2), height: Math.max(0, y(0) - y(v)), fill: colour });
+        f.svg.appendChild(r);
+        tipAt(r, [{ text: opts.xLabels ? opts.xLabels(g) : g.label }, { text: seriesNames[si] + ': ' + cell(v), colour: colour }]);
+      });
+      if (opts.xLabels) f.svg.appendChild(svg('text', { x: left + gi * gw + gw / 2, y: f.H - bottom + 16, 'text-anchor': 'middle' }, opts.xLabels(g)));
+    });
+    f.svg.appendChild(svg('line', { x1: left, x2: right, y1: y(0), y2: y(0), stroke: css('--cw-axis') }));
+    if (opts.limit) annotation(f, y, left, right, LIMIT_S, RED, LIMIT_LABEL);
+    if (opts.colours) groups.forEach(function (g, gi) { legendItem(f, opts.colours[gi], g.label, true); });
+    else seriesNames.forEach(function (n2, si) { legendItem(f, PALETTE[si % PALETTE.length], n2, true); });
+  }
+
+  function table(body, cols, rows) {
+    if (!rows.length) { note(body, 'No data found.'); return; }
+    var t = el('table', 'cw-table'), thead = el('thead'), hr = el('tr');
+    cols.forEach(function (c) { hr.appendChild(el('th', null, c)); });
+    thead.appendChild(hr); t.appendChild(thead);
+    var tb = el('tbody');
+    rows.forEach(function (r) {
       var tr = el('tr');
-      tr.appendChild(el('td', null, mytStamp(c.started)));
-      tr.appendChild(el('td', 'host-list', c.hosts.join(', ')));
-      var td = el('td'); td.appendChild(el('span', 'chip ' + (RESULT_TONE[c.result] || 'muted'), c.result)); td.title = c.summary; tr.appendChild(td);
-      tr.appendChild(el('td', 'num narrow-hide', c.scope_pct + '%'));
-      tr.appendChild(el('td', 'num', nf.format(c.succeeded)));
-      tr.appendChild(el('td', 'num', nf.format(c.attempted)));
-      tr.appendChild(el('td', 'num', dur(c.duration_s)));
-      body.appendChild(tr);
+      r.forEach(function (v) { tr.appendChild(el('td', typeof v === 'number' ? 'n' : null, cell(v))); });
+      tb.appendChild(tr);
     });
-    table.querySelectorAll('th').forEach(function (th) {
-      var b = th.querySelector('button');
-      if (b && b.dataset.key === key) th.setAttribute('aria-sort', dir === 1 ? 'ascending' : 'descending');
-      else th.removeAttribute('aria-sort');
+    t.appendChild(tb); body.appendChild(t);
+  }
+
+  var W = {};
+  W.header = function (body) {
+    var md = el('div', 'cw-md');
+    md.appendChild(el('h2', null, 'Centralized Agentless Patch Management'));
+    var p1 = el('p'); var b = el('strong', null, 'EventBridge Scheduler → Step Functions → Lambda → SSH (RHEL 9) / WinRM (Windows Server 2022)');
+    p1.appendChild(b); p1.appendChild(document.createTextNode(' · no agent on any host · region ' + (state.data.region || 'ap-southeast-5')));
+    var p2 = el('p'); p2.appendChild(document.createTextNode('The '));
+    p2.appendChild(el('strong', null, 'Host')); p2.appendChild(document.createTextNode(' selector changes the '));
+    p2.appendChild(el('em', null, 'Selected host')); p2.appendChild(document.createTextNode(' row · Colours: green from 90%, amber 80-90%, red below 80%'));
+    md.appendChild(p1); md.appendChild(p2); body.appendChild(md);
+  };
+  W.footer = function (body) {
+    var md = el('div', 'cw-md');
+    var p = el('p'); p.appendChild(el('strong', null, 'Control plane only.'));
+    p.appendChild(document.createTextNode(' Every value comes from Step Functions, Lambda, SNS and the serverless-patch-metrics log records. ' +
+      'The coloured panels at the top are CloudWatch custom widgets drawn by the read-only Lambda serverless-patch-summary-widget. ' +
+      'No monitoring agent is installed on any host. Success counts only updates confirmed fixed by the post-install rescan. ' +
+      'Cost is a list-price estimate from the execution history, before the free tier. Microsoft Defender updates are excluded from the Windows counts by design. ' +
+      'For the evaluation period, choose Evaluation at the top.'));
+    md.appendChild(p); body.appendChild(md);
+  };
+  function custom(name) {
+    return function (body) {
+      var panels = (state.data.panels || {})[isDark() ? 'dark' : 'light'] || {};
+      if (!panels[name]) { note(body, 'No data available.'); return; }
+      var host = el('div', 'cw-custom');
+      body.appendChild(host);
+      var root = host.attachShadow ? host.attachShadow({ mode: 'open' }) : host;
+      root.innerHTML = panels[name];       // generated by summary_widget.py; every value in it is HTML-escaped
+    };
+  }
+  W.kpi = custom('kpi'); W.hosts = custom('hosts'); W.severity = custom('severity');
+
+  W.hostGauge = function (body) {
+    var rows = hostRecs(state.data).filter(function (r) { return emfHost(r) && r.host === state.host; });
+    var att = rows.reduce(function (a, r) { return a + num(r.attempted); }, 0);
+    var ok = rows.reduce(function (a, r) { return a + num(r.succeeded); }, 0);
+    if (!att) { note(body, 'No data available.'); return; }
+    var pct = 100 * ok / att;
+    var f = frame(body, { legend: true, label: 'Success rate gauge' });
+    var r = Math.min(f.W / 2 - 16, f.H - 34, 120), cx = f.W / 2, cy = Math.min(f.H - 22, r + 40);
+    function pt(v, rad) { var a = Math.PI * (1 - v / 100); return [cx + rad * Math.cos(a), cy - rad * Math.sin(a)]; }
+    function arc(v0, v1, rad, colour, w) {
+      var a = pt(v0, rad), b = pt(v1, rad);
+      f.svg.appendChild(svg('path', { d: 'M' + a[0] + ' ' + a[1] + ' A' + rad + ' ' + rad + ' 0 0 1 ' + b[0] + ' ' + b[1], fill: 'none', stroke: colour, 'stroke-width': w }));
+    }
+    arc(0, 100, r - 10, css('--cw-grid'), 18);
+    arc(0, Math.min(100, pct), r - 10, GREEN, 18);
+    arc(0, 80, r + 3, RED, 4); arc(80, 90, r + 3, ORANGE, 4); arc(90, 100, r + 3, GREEN, 4);
+    var v = svg('text', { x: cx, y: cy - 8, 'text-anchor': 'middle' }, (Math.round(pct * 100) / 100).toLocaleString('en'));
+    v.style.cssText = 'font-size:' + Math.max(18, Math.min(34, r / 3)) + 'px;fill:var(--cw-text)'; f.svg.appendChild(v);
+    f.svg.appendChild(svg('text', { x: cx - r + 10, y: cy + 16, 'text-anchor': 'middle' }, '0'));
+    f.svg.appendChild(svg('text', { x: cx + r - 10, y: cy + 16, 'text-anchor': 'middle' }, '100'));
+    legendItem(f, GREEN, 'Verified / attempted (%)');
+  };
+  W.hostTime = function (body) {
+    var pts = hostRecs(state.data).filter(function (r) { return hostSeconds(r) && r.host === state.host; })
+      .map(function (r) { return { t: tsMs(r._ts), v: num(r.duration_s), ts: r._ts }; });
+    lineChart(body, [{ name: 'Deployment time (s)', colour: GREY, points: pts }],
+      { start: Date.parse(state.data.range.start), end: Date.parse(state.data.range.end), label: 'Deployment time per run' });
+  };
+  var HIST_COLS = ['@timestamp', 'mode', 'status', 'unit', 'before', 'after', 'succeeded', 'attempted', 'duration_s', 'rebooted', 'healthy', 'failed_at'];
+  W.hostHistory = function (body) {
+    var rows = hostRecs(state.data).filter(function (r) { return r.host === state.host; }).slice(0, 20);
+    table(body, HIST_COLS, rows.map(function (r) { return HIST_COLS.map(function (c) { return c === '@timestamp' ? stamp(r._ts) : r[c]; }); }));
+  };
+  function seriesByHost() {
+    var by = {};
+    hostRecs(state.data).filter(hostSeconds).forEach(function (r) {
+      (by[r.host] = by[r.host] || []).push({ t: tsMs(r._ts), v: num(r.duration_s), ts: r._ts });
+    });
+    return Object.keys(by).sort().map(function (h, i) { return { name: h, colour: PALETTE[i % PALETTE.length], points: by[h] }; });
+  }
+  W.barHost = function (body) {
+    var s = seriesByHost();
+    barChart(body, s.map(function (x) { return { label: x.name, values: [Math.max.apply(null, x.points.map(function (p) { return p.v; }))] }; }),
+      ['Longest run (s)'], { limit: true, yLabel: 'seconds', colours: s.map(function (x) { return x.colour; }), label: 'Longest deployment per host' });
+  };
+  W.timeAll = function (body) {
+    lineChart(body, seriesByHost(), { legend: true, yLabel: 'seconds', start: Date.parse(state.data.range.start), end: Date.parse(state.data.range.end), label: 'Deployment time per run' });
+  };
+  W.pie = function (body) {
+    var counts = {};
+    hostRecs(state.data).filter(function (r) { return r.mode === 'patch'; }).forEach(function (r) { counts[r.status] = (counts[r.status] || 0) + 1; });
+    var keys = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; });
+    if (!keys.length) { note(body, 'No data found.'); return; }
+    var f = frame(body, { legend: true, label: 'Host outcomes' });
+    var total = keys.reduce(function (a, k) { return a + counts[k]; }, 0);
+    var cx = f.W / 2, cy = f.H / 2, r = Math.min(f.W, f.H) / 2 - 6, a0 = -Math.PI / 2;
+    keys.forEach(function (k, i) {
+      var colour = PALETTE[i % PALETTE.length], a1 = a0 + 2 * Math.PI * counts[k] / total;
+      var node = keys.length === 1 ? svg('circle', { cx: cx, cy: cy, r: r, fill: colour })
+        : svg('path', { d: 'M' + cx + ' ' + cy + ' L' + (cx + r * Math.cos(a0)) + ' ' + (cy + r * Math.sin(a0)) + ' A' + r + ' ' + r + ' 0 ' + (a1 - a0 > Math.PI ? 1 : 0) + ' 1 ' + (cx + r * Math.cos(a1)) + ' ' + (cy + r * Math.sin(a1)) + ' Z', fill: colour, stroke: css('--cw-panel'), 'stroke-width': 1 });
+      f.svg.appendChild(node);
+      tipAt(node, [{ text: 'host_runs' }, { text: k + ': ' + counts[k] + ' (' + Math.round(1000 * counts[k] / total) / 10 + '%)', colour: colour }]);
+      legendItem(f, colour, k + ' (' + counts[k] + ')', true);
+      a0 = a1;
+    });
+  };
+  W.exp3 = function (body) {
+    var runs = {};
+    hostRecs(state.data).filter(function (r) { return r.mode === 'patch' && num(r.percent) === 100 && r.platform === 'rhel' && /^patched/.test(r.status || ''); })
+      .forEach(function (r) { (runs[r.run_id] = runs[r.run_id] || []).push(num(r.duration_s)); });
+    var byN = {};
+    Object.keys(runs).forEach(function (id) {
+      var d = runs[id], n = d.length;
+      (byN[n] = byN[n] || []).push({ run_s: Math.max.apply(null, d), host_s: d.reduce(function (a, b) { return a + b; }, 0) / n });
+    });
+    var groups = Object.keys(byN).map(Number).sort(function (a, b) { return a - b; }).map(function (n) {
+      var g = byN[n], avg = function (k) { return g.reduce(function (a, x) { return a + x[k]; }, 0) / g.length; };
+      return { label: String(n), values: [avg('run_s'), avg('host_s')] };
+    });
+    barChart(body, groups, ['total_workflow_s', 'per_host_s'], { xLabels: function (g) { return 'hosts_in_run ' + g.label; }, label: 'Scalability' });
+  };
+  W.orch = function (body) {
+    var m = state.data.metrics;
+    if (!m) { note(body, 'These Step Functions, Lambda and SNS counts come from CloudWatch metrics, so they appear on the published site only.'); return; }
+    var sv = el('div', 'cw-sv');
+    [['Executions', m.executions], ['Succeeded', m.succeeded], ['Failed', m.failed],
+      ['Lambda invocations', m.lambda_invocations], ['Lambda errors (incl. retried)', m.lambda_errors], ['Emails delivered', m.emails]]
+      .forEach(function (x, i) {
+        var d = el('div'); d.appendChild(el('div', 'l', x[0]));
+        var v = el('div', 'v', single(x[1]));
+        if (i === 1) v.style.color = GREEN; if (i === 2) v.style.color = RED;
+        d.appendChild(v); sv.appendChild(d);
+      });
+    body.appendChild(sv);
+  };
+  W.perDay = function (body) {
+    var m = state.data.metrics;
+    if (!m) { note(body, 'Comes from CloudWatch metrics; appears on the published site only.'); return; }
+    var days = m.per_day || [];
+    if (!days.length) { note(body, 'No data available.'); return; }
+    var f = frame(body, { legend: true, label: 'Executions per day' });
+    var max = niceMax(Math.max(1, Math.max.apply(null, days.map(function (d) { return d.succeeded + d.failed; }))) * 1.1);
+    var left = leftMargin(f, max), top = 10, bottom = 22, right = f.W - 6;
+    var y = yAxis(f, max, left, top, bottom);
+    var x = timeAxis(f, Date.parse(state.data.range.start), Date.parse(state.data.range.end), left, right, bottom);
+    var pts = days.map(function (d) { return { t: Date.parse(d.day + 'T00:00:00Z'), s: d.succeeded, f: d.failed, day: d.day }; });
+    function area(lo, hi, colour) {
+      var top1 = pts.map(function (p) { return x(p.t) + ',' + y(hi(p)); }), base = pts.slice().reverse().map(function (p) { return x(p.t) + ',' + y(lo(p)); });
+      f.svg.appendChild(svg('polygon', { points: top1.concat(base).join(' '), fill: colour, 'fill-opacity': 0.35, stroke: 'none' }));
+      f.svg.appendChild(svg('polyline', { points: top1.join(' '), fill: 'none', stroke: colour, 'stroke-width': 2 }));
+    }
+    area(function () { return 0; }, function (p) { return p.s; }, GREEN);
+    area(function (p) { return p.s; }, function (p) { return p.s + p.f; }, RED);
+    var dots = pts.map(function (p) {
+      var c = svg('circle', { cx: x(p.t), cy: y(p.s + p.f), r: 3, fill: p.f ? RED : GREEN }); f.svg.appendChild(c);
+      return { c: c, p: p, cx: x(p.t), cy: y(p.s + p.f) };
+    });
+    hover(f, dots, function (d) { return [{ text: d.p.day + ' (UTC)' }, { text: 'Succeeded: ' + d.p.s, colour: GREEN }, { text: 'Failed: ' + d.p.f, colour: RED }]; });
+    legendItem(f, GREEN, 'Succeeded'); legendItem(f, RED, 'Failed');
+  };
+  W.platform = function (body) {
+    var g = {};
+    hostRecs(state.data).filter(function (r) { return r.mode === 'patch' && num(r.attempted) > 0; }).forEach(function (r) {
+      var k = (r.platform || '') + '|' + (r.unit || '');
+      var x = g[k] || (g[k] = { platform: r.platform, unit: r.unit, verified: 0, tried: 0, host_runs: 0 });
+      x.verified += num(r.succeeded); x.tried += num(r.attempted); x.host_runs += 1;
+    });
+    var rows = Object.keys(g).sort().map(function (k) { var x = g[k]; return [x.platform, x.unit, x.verified, x.tried, 100 * x.verified / x.tried, x.host_runs]; });
+    table(body, ['platform', 'unit', 'verified', 'tried', 'success_pct', 'host_runs'], rows);
+  };
+  W.costSv = function (body) {
+    if (state.data.cost_known === false) { note(body, 'Cost is estimated in CloudWatch from each execution\'s history and is not in the evidence files; it appears on the published site.'); return; }
+    var c = cycleRecs(state.data).filter(function (r) { return r.mode === 'patch' && num(r.hosts_total) > 0 && typeof r.cost_usd === 'number'; });
+    var sum = c.reduce(function (a, r) { return a + r.cost_usd; }, 0);
+    var sv = el('div', 'cw-sv');
+    [['Per patch cycle (avg)', c.length ? sum / c.length : null], ['All cycles in range', c.length ? sum : null]].forEach(function (x) {
+      var d = el('div'); d.appendChild(el('div', 'l', x[0])); d.appendChild(el('div', 'v', single(x[1]))); sv.appendChild(d);
+    });
+    body.appendChild(sv);
+  };
+  W.costTable = function (body) {
+    var rows = cycleRecs(state.data).filter(function (r) { return r.mode === 'patch'; }).slice(0, 20);
+    table(body, ['@timestamp', 'hosts', 'cycle_s', 'transitions', 'invokes', 'gb_s', 'sfn_usd', 'lambda_usd', 'total_usd'],
+      rows.map(function (r) { return [stamp(r._ts), r.hosts_total, r.duration_s, r.transitions, r.lambda_invocations, r.lambda_gb_s, r.cost_sfn_usd, r.cost_lambda_usd, r.cost_usd]; }));
+  };
+  var LATEST_COLS = ['@timestamp', 'mode', 'host', 'status', 'unit', 'before', 'after', 'succeeded', 'attempted', 'duration_s', 'rebooted', 'healthy', 'failed_at'];
+  W.latest = function (body) {
+    table(body, LATEST_COLS, hostRecs(state.data).slice(0, 30).map(function (r) {
+      return LATEST_COLS.map(function (c) { return c === '@timestamp' ? stamp(r._ts) : r[c]; });
+    }));
+  };
+
+  // ------------------------------------------------------------ grid
+  var grid = $('cw-grid');
+  function title(spec) { return (spec.title || '').replace('{host}', state.host || '—'); }
+  function render() {
+    hideTip();
+    grid.replaceChildren();
+    if (!state.data) return;
+    LAYOUT.forEach(function (spec) {
+      var w = el('section', 'cw-w' + (spec.plain ? ' cw-plain' : '') + (spec.type === 'text' || spec.type === 'custom' ? ' cw-auto' : ''));
+      w.style.setProperty('--x', spec.x + 1); w.style.setProperty('--y', spec.y + 1);
+      w.style.setProperty('--w', spec.w); w.style.setProperty('--h', spec.h);
+      w.dataset.widget = spec.id;
+      if (spec.title) {
+        var head = el('header', 'cw-wh'); head.appendChild(el('h3', null, title(spec))); w.appendChild(head);
+        w.setAttribute('aria-label', title(spec));
+      }
+      var body = el('div', 'cw-wb' + (spec.table ? ' cw-tbl' : '') + (spec.type || spec.table ? '' : ' cw-fill'));
+      w.appendChild(body);
+      grid.appendChild(w);
+      try { W[spec.id](body); } catch (e) { body.replaceChildren(); note(body, 'This widget could not be drawn.'); if (window.console) console.error(spec.id, e); }
     });
   }
-  table.querySelectorAll('th button').forEach(function (b) {
-    b.addEventListener('click', function () {
-      if (state.sortKey === b.dataset.key) state.sortDir = -state.sortDir;
-      else { state.sortKey = b.dataset.key; state.sortDir = (state.sortKey === 'hosts' || state.sortKey === 'result') ? 1 : -1; }
-      drawTable();
+
+  // ------------------------------------------------------------ host selector (the dashboard's var_host)
+  var select = $('cw-host');
+  function fillHosts() {
+    var hosts = hostList(state.data);
+    var wanted = state.host || new URLSearchParams(window.location.search).get('host');
+    if (!hosts.some(function (h) { return h.host === wanted; })) {
+      var rhel = hosts.filter(function (h) { return h.platform === 'rhel'; })[0];
+      wanted = (rhel || hosts[0] || {}).host || null;
+    }
+    state.host = wanted;
+    select.replaceChildren();
+    hosts.forEach(function (h) {
+      var o = el('option', null, short(h.host) + ' (' + h.platform + ')'); o.value = h.host;
+      if (h.host === wanted) o.selected = true; select.appendChild(o);
+    });
+    select.disabled = !hosts.length;
+  }
+  select.addEventListener('change', function () {
+    state.host = select.value;
+    setUrl();
+    ['hostGauge', 'hostTime', 'hostHistory'].forEach(function (id) {
+      var w = grid.querySelector('[data-widget="' + id + '"]'); if (!w) return;
+      var spec = LAYOUT.filter(function (s) { return s.id === id; })[0];
+      w.querySelector('h3').textContent = title(spec); w.setAttribute('aria-label', title(spec));
+      var body = w.querySelector('.cw-wb'); body.replaceChildren(); W[id](body);
     });
   });
 
-  // ------------------------------------------------------------ views and live updates
-  var btnLive = $('view-live'), btnEval = $('view-evaluation');
-  $('eval-range').textContent = evalRange();
-  if (!EVAL) btnEval.disabled = true;
+  // ------------------------------------------------------------ status line
+  function drawStatus() {
+    var line = $('status-line'), text = $('status-text'), d = state.data;
+    line.classList.remove('is-ok', 'is-warn', 'is-running');
+    if (!d) { text.textContent = 'No results to show yet.'; return; }
+    var st = d.status || {};
+    if (state.view === 'live' && st.state === 'running') {
+      line.classList.add('is-running');
+      text.textContent = (st.mode === 'patch' ? 'Patch cycle' : 'Scan') + ' in progress · started ' + clock(st.since) + ' MYT (' + ago(st.since) + ')' +
+        (st.count > 1 ? ' · ' + st.count + ' runs' : '') + ' · this dashboard updates when it finishes';
+      return;
+    }
+    var latest = {};
+    hostRecs(d).forEach(function (r) { if (r.mode === 'patch' && r.host && !latest[r.host]) latest[r.host] = r; });
+    var hosts = Object.keys(latest), clean = hosts.filter(function (h) { return latest[h].after === 0; }).length;
+    line.classList.add(hosts.length && clean === hosts.length ? 'is-ok' : 'is-warn');
+    var base = hosts.length ? 'Latest patch run on each host: ' + clean + ' of ' + hosts.length + ' hosts with no missing updates' : 'No patch runs in this range';
+    if (state.view === 'live') text.textContent = base + ' · updated ' + ago(d.generated_at);
+    else text.textContent = base + ' · ' + (d.source === 'evidence' ? 'from the evidence files (cost and orchestration counts only on the published site)' : 'from CloudWatch');
+  }
+  function show(d) {
+    state.data = d;
+    $('cw-range').textContent = (d.range && d.range.label) || '';
+    $('source-note').textContent = d.source === 'evidence'
+      ? 'This view is built from the cycle results in the repository\'s evidence/ folder.'
+      : 'Data from CloudWatch (serverless-patch-metrics records and Step Functions, Lambda and SNS metrics), published by the serverless-patch-site-publisher Lambda.';
+    fillHosts(); drawStatus(); render();
+  }
 
-  function setView(view, automatic) {
+  // ------------------------------------------------------------ views and loading
+  var btnLive = $('view-live'), btnEval = $('view-evaluation');
+  $('eval-range').textContent = FALLBACK && FALLBACK.range ? FALLBACK.range.label : '';
+  var fromDisk = window.location.protocol === 'file:';
+
+  function setUrl() {
+    if (fromDisk) return;
+    try {
+      var url = new URL(window.location.href);
+      if (state.view === 'evaluation') url.searchParams.set('view', 'evaluation'); else url.searchParams.delete('view');
+      if (state.host) url.searchParams.set('host', state.host); else url.searchParams.delete('host');
+      window.history.replaceState(null, '', url);
+    } catch (e) { /* the view still works */ }
+  }
+  function getJson(path) {
+    return fetch(path + '?t=' + Date.now(), { cache: 'no-store' }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    }).then(function (text) {
+      var d = JSON.parse(text);
+      if (!d || !Array.isArray(d.records)) throw new Error('unexpected data');
+      return { d: d, text: text };
+    });
+  }
+  function hasPatch(d) { return cycleRecs(d).some(function (r) { return r.mode === 'patch'; }); }
+
+  function setView(view, quiet) {
     state.view = view;
     btnLive.setAttribute('aria-pressed', String(view === 'live'));
     btnEval.setAttribute('aria-pressed', String(view === 'evaluation'));
-    if (!automatic) try {
-      var url = new URL(window.location.href);
-      if (view === 'evaluation') url.searchParams.set('view', 'evaluation'); else url.searchParams.delete('view');
-      window.history.replaceState(null, '', url);
-    } catch (e) { /* file:// or an old browser: the view still switches */ }
-    if (view === 'evaluation') { if (EVAL) render(EVAL); return; }
-    if (state.live) render(state.live);
-    loadLive();
+    if (!quiet) setUrl();
+    if (view === 'live') { if (state.live) show(state.live); return loadLive(); }
+    if (state.evaluation) { show(state.evaluation); return; }
+    if (FALLBACK) show(FALLBACK);
+    if (fromDisk) return;
+    getJson('data/evaluation.json').then(function (x) {
+      if (!hasPatch(x.d)) return;            // nothing in CloudWatch for the period: keep the evidence view
+      state.evaluation = x.d;
+      if (state.view === 'evaluation') show(x.d);
+    }).catch(function () { /* keep the evidence view */ });
   }
-
   function loadLive() {
-    return fetch(LIVE_URL + '?t=' + Date.now(), { cache: 'no-store' })
-      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
-      .then(function (text) {
-        var d = JSON.parse(text);
-        if (!d || !Array.isArray(d.cycles)) throw new Error('unexpected live data');
-        var changed = text !== state.liveText;
-        if (changed) { state.live = d; state.liveText = text; }
-        state.liveFailed = false;
-        btnLive.title = '';
-        if (state.view !== 'live') return;
-        if (changed || state.data !== state.live) render(state.live); else drawStatus();
-      })
-      .catch(function () {
-        state.liveFailed = true;
-        btnLive.title = 'Live results are not available right now';
-        if (state.view !== 'live') return;
-        if (state.live) { drawStatus(); return; }          // keep the last good data on screen
-        if (EVAL) {
-          setView('evaluation', true);
-          $('status-text').textContent += ' · live results are not published yet';
-        } else {
-          $('status-text').textContent = 'Live results are not available yet.';
-        }
-      });
+    return getJson('data/live.json').then(function (x) {
+      var changed = x.text !== state.liveText;
+      if (changed) { state.live = x.d; state.liveText = x.text; }
+      btnLive.title = '';
+      if (state.view !== 'live') return;
+      if (changed || state.data !== state.live) show(state.live); else drawStatus();
+    }).catch(function () {
+      btnLive.title = 'Live results are not available right now';
+      if (state.view !== 'live') return;
+      if (state.live) { drawStatus(); return; }
+      if (FALLBACK) { setView('evaluation', true); $('status-text').textContent += ' · live data is not published yet'; }
+      else $('status-text').textContent = 'Live data is not available yet.';
+    });
   }
-
   btnLive.addEventListener('click', function () { if (state.view !== 'live') setView('live'); });
-  btnEval.addEventListener('click', function () { if (state.view !== 'evaluation' && EVAL) setView('evaluation'); });
+  btnEval.addEventListener('click', function () { if (state.view !== 'evaluation') setView('evaluation'); });
+  if (!FALLBACK && fromDisk) btnEval.disabled = true;
 
-  // Re-check every minute while the live view is on screen, and as soon as the tab comes back.
   setInterval(function () {
     if (state.view !== 'live' || document.hidden) return;
-    if (state.data) drawStatus();          // keeps "updated 3 min ago" honest between loads
+    if (state.data) drawStatus();
     loadLive();
   }, POLL_MS);
-  document.addEventListener('visibilitychange', function () {
-    if (!document.hidden && state.view === 'live') loadLive();
-  });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden && state.view === 'live') loadLive(); });
 
-  var wanted = new URLSearchParams(window.location.search).get('view') === 'evaluation' && EVAL ? 'evaluation' : 'live';
-  var fromDisk = window.location.protocol === 'file:';
-  if (wanted === 'live' && fromDisk && EVAL) wanted = 'evaluation'; // no live data when opened from disk
-  setView(wanted, fromDisk);
+  var wanted = new URLSearchParams(window.location.search).get('view') === 'evaluation' ? 'evaluation' : 'live';
+  if (fromDisk) wanted = 'evaluation';
+  setView(wanted, true);
 
-  // ------------------------------------------------------------ keep charts in step with size and theme
-  var lastW = $('dur-chart').clientWidth;
-  if (window.ResizeObserver) {
-    new ResizeObserver(function () {
-      var w = $('dur-chart').clientWidth;
-      if (Math.abs(w - lastW) > 4 && state.redraw) { lastW = w; hideTip(); state.redraw(); }
-    }).observe($('dur-chart'));
-  }
-  var mq = window.matchMedia('(prefers-color-scheme: dark)');
-  if (mq.addEventListener) mq.addEventListener('change', function () { if (state.redraw) state.redraw(); });
+  // Redraw charts when the layout width or the theme changes.
+  var lastW = grid.clientWidth;
+  function redrawSoon() { clearTimeout(state.redrawTimer); state.redrawTimer = setTimeout(render, 150); }
+  if (window.ResizeObserver) new ResizeObserver(function () { if (Math.abs(grid.clientWidth - lastW) > 8) { lastW = grid.clientWidth; redrawSoon(); } }).observe(grid);
+  var mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+  if (mq && mq.addEventListener) mq.addEventListener('change', redrawSoon);
 })();

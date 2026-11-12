@@ -1,131 +1,132 @@
-"""serverless-patch-site-publisher: keeps the project website's live results up to date.
+"""serverless-patch-site-publisher: keeps the project website's dashboard up to date.
 
-Triggered by EventBridge on every status change of the serverless-patch-cycle state machine
-(RUNNING, SUCCEEDED, FAILED, TIMED_OUT, ABORTED), and once by deploy-site.ps1 after a deploy.
+The website mirrors the CloudWatch dashboard PatchManagement-Dashboard. This Lambda gathers the
+same data the dashboard reads and writes it as JSON the website draws:
 
-Each call:
-  1. reads the patch host and cycle records that serverless-patch-metrics wrote to its log group
-     (Logs Insights, last LIVE_DAYS days), waiting briefly for the record of a cycle that has just
-     finished, so the page never shows a finished cycle as missing;
-  2. lists running executions, so the page can show "patch cycle in progress";
-  3. writes data/live.json to the site bucket (only the fields the page shows: no account ID,
-     ARNs, instance IDs or IP addresses) and clears /data/live.json in CloudFront.
+  data/live.json        last LIVE_DAYS days, plus "patch cycle in progress" status
+  data/evaluation.json  the fixed evaluation period EVAL_FROM..EVAL_TO (Malaysia time), if set
 
-No host access, no secrets, no VPC.
+Each file holds:
+  records   serverless-patch-metrics host and cycle records (scan and patch), newest first, with
+            only the fields the dashboard shows (no account ID, ARNs, instance IDs or IP addresses)
+  panels    the three coloured Patch Summary panels, rendered by summary_widget.py itself, so they
+            are the same HTML as the CloudWatch custom widgets (light and dark)
+  metrics   Step Functions / Lambda / SNS counts for the Orchestration Layer widget and the
+            executions-per-day chart (CloudWatch GetMetricData)
 
-Environment:
-  LOG_GROUP          metrics log group (default /aws/lambda/serverless-patch-metrics)
-  BUCKET             site bucket
-  DISTRIBUTION_ID    CloudFront distribution of the site
-  STATE_MACHINE_ARN  serverless-patch-cycle ARN
-  LIVE_DAYS          how many days of results the live view shows (default 30)
+Triggered by EventBridge on every status change of serverless-patch-cycle (RUNNING, SUCCEEDED,
+FAILED, TIMED_OUT, ABORTED), and once by deploy-site.ps1. No host access, no secrets, no VPC.
 """
 import json
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
-import metrics  # packaged alongside: verdict() gives the same result word as the email and dashboard
+import summary_widget  # packaged alongside: same panels and same summarise() as the CloudWatch widgets
 
 LOG_GROUP = os.environ.get("LOG_GROUP", "/aws/lambda/serverless-patch-metrics")
 BUCKET = os.environ.get("BUCKET", "")
 DISTRIBUTION_ID = os.environ.get("DISTRIBUTION_ID", "")
 STATE_MACHINE_ARN = os.environ.get("STATE_MACHINE_ARN", "")
 LIVE_DAYS = int(os.environ.get("LIVE_DAYS", "30"))
-KEY = "data/live.json"
+EVAL_FROM = os.environ.get("EVAL_FROM", "")     # YYYY-MM-DD, Malaysia time
+EVAL_TO = os.environ.get("EVAL_TO", "")         # YYYY-MM-DD, inclusive
+FUNCTIONS = [f for f in (os.environ.get("RHEL_FN", "serverless-patch-rhel"),
+                         os.environ.get("WIN_FN", "serverless-patch-windows"),
+                         os.environ.get("METRICS_FN", "serverless-patch-metrics")) if f]
+TOPIC_NAME = os.environ.get("TOPIC_NAME", "serverless-patch-notify")
+REGION = os.environ.get("AWS_REGION", "ap-southeast-5")
+MYT = timezone(timedelta(hours=8))
 LAMBDA_LIMIT_S = 900
-TERMINAL = ("SUCCEEDED", "FAILED", "TIMED_OUT", "ABORTED")
 QUERY = ("fields @timestamp, @message | filter record = 'host' or record = 'cycle' "
-         "| filter mode = 'patch' | sort @timestamp desc | limit 10000")
-SEVERITY_FIELDS = ("fixed_critical", "fixed_important", "fixed_moderate", "fixed_low", "fixed_unrated")
+         "| sort @timestamp desc | limit 10000")
+
+# Fields the dashboard shows. Everything else in a record (execution ARN, kernel builds,
+# EMF metadata) stays in CloudWatch.
+HOST_FIELDS = ("record", "run_id", "mode", "percent", "host", "platform", "workload", "unit", "status",
+               "before", "after", "attempted", "succeeded", "duration_s", "rebooted", "healthy",
+               "failed_at", "reason", "passes", "followup_passes", "first_pass_succeeded",
+               "fixed_critical", "fixed_important", "fixed_moderate", "fixed_low", "fixed_unrated")
+CYCLE_FIELDS = ("record", "run_id", "mode", "percent", "started", "finished", "duration_s", "hosts_total",
+                "patched", "patched_partial", "compliant", "scanned", "skipped", "failed",
+                "avg_host_seconds", "attempted", "succeeded", "transitions", "lambda_invocations",
+                "lambda_seconds", "lambda_gb_s", "cost_sfn_usd", "cost_lambda_usd", "cost_other_usd",
+                "cost_usd")
+_MASKS = [(re.compile(r"\barn:aws[\w:/+=,.@-]*"), "arn:…"),
+          (re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"), "x.x.x.x"),
+          (re.compile(r"\bi-[0-9a-f]{8,17}\b"), "i-…"),
+          (re.compile(r"\b\d{12}\b"), "…")]
 
 
-def _num(v, default=0):
-    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else default
+def _mask(text):
+    text = "" if text is None else str(text)
+    for rx, repl in _MASKS:
+        text = rx.sub(repl, text)
+    return text
+
+
+def safe_record(rec):
+    keep = HOST_FIELDS if rec.get("record") == "host" else CYCLE_FIELDS
+    out = {k: rec[k] for k in keep if k in rec}
+    if "reason" in out:
+        out["reason"] = _mask(out["reason"])
+    if "failed_at" in out:
+        out["failed_at"] = _mask(out["failed_at"])
+    out["_ts"] = rec.get("_ts")
+    return out
 
 
 def _iso(dt):
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def short(host):
-    return (host or "").replace("serverless-patch-", "")
+def logs_ts(dt):
+    """A time in the format Logs Insights gives @timestamp (UTC), which summary_widget expects."""
+    dt = dt.astimezone(timezone.utc)
+    return dt.strftime("%Y-%m-%d %H:%M:%S.") + f"{dt.microsecond // 1000:03d}"
 
 
-# ------------------------------------------------------------------ records -> page data
-def build_live(records, status, now, days=LIVE_DAYS):
-    """Turn metrics log records (newest first or any order) into the page's data shape.
-
-    records: dicts as written by metrics.host_records / metrics.cycle_record, each with "_ts"
-    (the log event time). Only patch-mode cycles with at least one host are kept, as on the
-    CloudWatch dashboard. When a cycle was recorded twice, the latest record wins.
-    """
-    cycles_by_run, hosts_by_run = {}, {}
-    for rec in sorted(records, key=lambda r: str(r.get("_ts") or "")):
-        if rec.get("mode") != "patch" or not rec.get("run_id"):
-            continue
-        if rec.get("record") == "cycle":
-            if _num(rec.get("hosts_total")) > 0:
-                cycles_by_run[rec["run_id"]] = rec
-        elif rec.get("record") == "host" and rec.get("host"):   # one row per host; a later record wins
-            hosts_by_run.setdefault(rec["run_id"], {})[rec["host"]] = rec
-
-    host_runs, cycles = [], []
-    for run_id, c in cycles_by_run.items():
-        started = c.get("started")
-        if not started:
-            continue
-        rows = list((hosts_by_run.get(run_id) or {}).values())
-        for h in rows:
-            row = {
-                "run_id": run_id,
-                "started": started,
-                "host": short(h.get("host")),
-                "platform": h.get("platform"),
-                "workload": h.get("workload"),
-                "unit": h.get("unit") or ("KB" if h.get("platform") == "windows" else "RHSA"),
-                "status": h.get("status"),
-                "scope_pct": _num(h.get("percent"), 100),
-                "before": h.get("before"),
-                "after": h.get("after"),
-                "attempted": _num(h.get("attempted")),
-                "succeeded": _num(h.get("succeeded")),
-                "duration_s": _num(h.get("duration_s")),
-                "rebooted": h.get("rebooted"),
-                "healthy": h.get("healthy"),
-                "failed_at": h.get("failed_at") or "",
-            }
-            for k in SEVERITY_FIELDS:
-                row[k] = _num(h.get(k))
-            host_runs.append(row)
-        word, summary = metrics.verdict(c)
-        cycles.append({
-            "run_id": run_id,
-            "started": started,
-            "hosts": sorted(short(h.get("host")) for h in rows),
-            "hosts_total": _num(c.get("hosts_total")),
-            "scope_pct": _num(c.get("percent"), 100),
-            "result": word,
-            "summary": summary,
-            "patched": _num(c.get("patched")),
-            "partial": _num(c.get("patched_partial")),
-            "failed": _num(c.get("failed")),
-            "attempted": _num(c.get("attempted")),
-            "succeeded": _num(c.get("succeeded")),
-            "duration_s": _num(c.get("duration_s")),
-        })
-    host_runs.sort(key=lambda r: r["started"])
-    cycles.sort(key=lambda r: r["started"])
+# ------------------------------------------------------------------ the page's data
+def build_payload(records, view, start, end, label, metrics=None, status=None, source="cloudwatch", now=None,
+                  cost_known=True):
+    """records: metrics log records with "_ts" (Logs Insights @timestamp format), any order.
+    cost_known=False (records rebuilt from evidence/, which has no cost) shows cost as "-"."""
+    now = now or datetime.now(timezone.utc)
+    recs = [safe_record(r) for r in records if r.get("record") in ("host", "cycle")]
+    recs.sort(key=lambda r: str(r.get("_ts") or ""), reverse=True)      # newest first, as Logs Insights
+    s = summary_widget.summarise(recs)
+    if not cost_known:
+        s["avg_cost"] = None
+    panels = {theme: {name: summary_widget.render(name, s, theme == "dark")
+                      for name in ("kpi", "hosts", "severity")}
+              for theme in ("light", "dark")}
     return {
-        "view": "live",
+        "view": view,
+        "source": source,
         "generated_at": _iso(now),
-        "region": metrics.REGION,
+        "region": REGION,
         "lambda_limit_s": LAMBDA_LIMIT_S,
-        "window": {"days": days, "from": None, "to": None},
+        "range": {"start": _iso(start), "end": _iso(end), "label": label},
         "status": status,
-        "host_runs": host_runs,
-        "cycles": cycles,
+        "records": recs,
+        "panels": panels,
+        "metrics": metrics,
+        "cost_known": cost_known,
     }
+
+
+def eval_window(now, date_from=None, date_to=None):
+    """(start, end, label) for a reporting period of whole days in Malaysia time, or None."""
+    date_from, date_to = date_from or EVAL_FROM, date_to or EVAL_TO
+    if not (date_from and date_to):
+        return None
+    start = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=MYT)
+    last = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=MYT)
+    end = min(last + timedelta(days=1), now)
+    label = (f"{start.day}–{last.day} {last.strftime('%b %Y')}" if (start.year, start.month) == (last.year, last.month)
+             else f"{start.day} {start.strftime('%b %Y')} – {last.day} {last.strftime('%b %Y')}")
+    return start, end, label
 
 
 # ------------------------------------------------------------------ AWS reads
@@ -159,38 +160,89 @@ def fetch_records(start, end, logs):
     return out
 
 
+def fetch_metrics(start, end, cw, now):
+    """Counts for the Orchestration Layer widget and Step Functions Executions per Day."""
+    specs = [("executions", "AWS/States", "ExecutionsStarted", "StateMachineArn", STATE_MACHINE_ARN),
+             ("succeeded", "AWS/States", "ExecutionsSucceeded", "StateMachineArn", STATE_MACHINE_ARN),
+             ("failed", "AWS/States", "ExecutionsFailed", "StateMachineArn", STATE_MACHINE_ARN),
+             ("emails", "AWS/SNS", "NumberOfNotificationsDelivered", "TopicName", TOPIC_NAME)]
+    for i, fn in enumerate(FUNCTIONS):
+        specs.append((f"inv{i}", "AWS/Lambda", "Invocations", "FunctionName", fn))
+        specs.append((f"err{i}", "AWS/Lambda", "Errors", "FunctionName", fn))
+    # Hourly data is kept 63 days; older ranges are read per day.
+    period = 3600 if (now - start) < timedelta(days=60) else 86400
+    queries = [{"Id": qid, "ReturnData": True, "MetricStat": {
+        "Metric": {"Namespace": ns, "MetricName": name, "Dimensions": [{"Name": dim, "Value": val}]},
+        "Period": period, "Stat": "Sum"}} for qid, ns, name, dim, val in specs if val]
+    series, token = {}, None
+    while True:
+        kw = {"MetricDataQueries": queries, "StartTime": start, "EndTime": end, "ScanBy": "TimestampAscending"}
+        if token:
+            kw["NextToken"] = token
+        page = cw.get_metric_data(**kw)
+        for res in page.get("MetricDataResults", []):
+            series.setdefault(res["Id"], []).extend(zip(res.get("Timestamps", []), res.get("Values", [])))
+        token = page.get("NextToken")
+        if not token:
+            break
+
+    def total(qid):
+        return round(sum(v for _, v in series.get(qid, [])))
+
+    per_day = {}
+    for key in ("succeeded", "failed"):
+        for ts, v in series.get(key, []):
+            day = ts.astimezone(timezone.utc).strftime("%Y-%m-%d")      # CloudWatch day periods are UTC
+            per_day.setdefault(day, {"day": day, "succeeded": 0, "failed": 0})[key] += v
+    return {
+        "executions": total("executions"),
+        "succeeded": total("succeeded"),
+        "failed": total("failed"),
+        "lambda_invocations": sum(total(f"inv{i}") for i in range(len(FUNCTIONS))),
+        "lambda_errors": sum(total(f"err{i}") for i in range(len(FUNCTIONS))),
+        "emails": total("emails"),
+        "per_day": [{"day": d["day"], "succeeded": round(d["succeeded"]), "failed": round(d["failed"])}
+                    for d in sorted(per_day.values(), key=lambda d: d["day"])],
+    }
+
+
 def running_status(sfn):
-    """What is running now. Asks Step Functions directly, so the answer is right whatever
-    order the status-change events arrive in."""
+    """What is running now, asked of Step Functions directly (right whatever order events arrive in)."""
     if not STATE_MACHINE_ARN:
         return {"state": "unknown"}
     res = sfn.list_executions(stateMachineArn=STATE_MACHINE_ARN, statusFilter="RUNNING", maxResults=10)
     execs = sorted(res.get("executions", []), key=lambda e: e["startDate"])
     if not execs:
         return {"state": "idle"}
-    first = execs[0]
     mode = "scan"
     try:
-        inp = json.loads(sfn.describe_execution(executionArn=first["executionArn"]).get("input") or "{}")
+        inp = json.loads(sfn.describe_execution(executionArn=execs[0]["executionArn"]).get("input") or "{}")
         mode = inp.get("mode") or "scan"
-    except Exception:  # noqa: BLE001 (mode is a label only)
+    except Exception:  # noqa: BLE001 (the mode is a label only)
         pass
     return {"state": "running", "mode": mode if mode in ("scan", "patch") else "scan",
-            "since": _iso(first["startDate"]), "count": len(execs)}
+            "since": _iso(execs[0]["startDate"]), "count": len(execs)}
+
+
+def put_json(s3, key, data):
+    body = json.dumps(data, separators=(",", ":"), default=str).encode("utf-8")
+    s3.put_object(Bucket=BUCKET, Key=key, Body=body, ContentType="application/json; charset=utf-8",
+                  CacheControl="public, max-age=30")
+    return len(body)
 
 
 # ------------------------------------------------------------------ handler
-def lambda_handler(event, context=None, logs=None, sfn=None, s3=None, cloudfront=None):
-    if not (logs and sfn and s3 and cloudfront):
+def lambda_handler(event, context=None, logs=None, sfn=None, s3=None, cloudfront=None, cw=None):
+    if not (logs and sfn and s3 and cloudfront and cw):
         import boto3
         logs = logs or boto3.client("logs")
         sfn = sfn or boto3.client("stepfunctions")
         s3 = s3 or boto3.client("s3")
         cloudfront = cloudfront or boto3.client("cloudfront")
+        cw = cw or boto3.client("cloudwatch")
 
     detail = (event or {}).get("detail") or {}
-    exec_status = detail.get("status")
-    exec_name = detail.get("name")
+    exec_status, exec_name = detail.get("status"), detail.get("name")
     try:
         exec_mode = (json.loads(detail.get("input") or "{}") or {}).get("mode") or "scan"
     except (ValueError, AttributeError):
@@ -199,8 +251,7 @@ def lambda_handler(event, context=None, logs=None, sfn=None, s3=None, cloudfront
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=LIVE_DAYS)
     records = fetch_records(start, now, logs)
-
-    # A patch cycle that has just succeeded: its records may take a few seconds to become
+    # A patch cycle that has just succeeded: its records can take a few seconds to become
     # searchable. Wait for them (up to about 90 s) rather than publish a page without it.
     waited = 0
     if exec_status == "SUCCEEDED" and exec_mode == "patch" and exec_name:
@@ -210,19 +261,28 @@ def lambda_handler(event, context=None, logs=None, sfn=None, s3=None, cloudfront
             now = datetime.now(timezone.utc)
             records = fetch_records(start, now, logs)
 
-    status = running_status(sfn)
-    data = build_live(records, status, now)
-    body = json.dumps(data, separators=(",", ":"), default=str).encode("utf-8")
-    s3.put_object(Bucket=BUCKET, Key=KEY, Body=body, ContentType="application/json; charset=utf-8",
-                  CacheControl="public, max-age=30")
+    live = build_payload(records, "live", start, now, f"Last {LIVE_DAYS} days",
+                         metrics=fetch_metrics(start, now, cw, now), status=running_status(sfn), now=now)
+    written = {"data/live.json": put_json(s3, "data/live.json", live)}
+
+    ev = eval_window(now)
+    if ev:
+        e_start, e_end, e_label = ev
+        e_records = fetch_records(e_start, e_end, logs)
+        evaluation = build_payload(e_records, "evaluation", e_start, e_end, e_label,
+                                   metrics=fetch_metrics(e_start, e_end, cw, now), now=now)
+        written["data/evaluation.json"] = put_json(s3, "data/evaluation.json", evaluation)
+
     inv = None
     if DISTRIBUTION_ID:
+        paths = ["/" + k for k in written]
         inv = cloudfront.create_invalidation(DistributionId=DISTRIBUTION_ID, InvalidationBatch={
-            "Paths": {"Quantity": 1, "Items": ["/" + KEY]},
+            "Paths": {"Quantity": len(paths), "Items": paths},
             "CallerReference": f"live-{int(time.time() * 1000)}",
         })["Invalidation"]["Id"]
-    result = {"key": KEY, "bytes": len(body), "cycles": len(data["cycles"]), "host_runs": len(data["host_runs"]),
-              "status": status.get("state"), "trigger": exec_status or (event or {}).get("source") or "manual",
+    result = {"written": written, "records": len(live["records"]),
+              "patch_cycles": sum(1 for r in live["records"] if r.get("record") == "cycle" and r.get("mode") == "patch"),
+              "status": (live["status"] or {}).get("state"), "trigger": exec_status or (event or {}).get("source") or "manual",
               "execution": exec_name, "waited_s": waited, "invalidation": inv}
     print(json.dumps(result))
     return result
