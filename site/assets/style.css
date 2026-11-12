@@ -103,10 +103,24 @@ code { font-family: var(--font-mono); font-size: .88em; background: var(--surfac
   .svc { white-space: normal; }
 }
 
-.status-line { display: inline-flex; align-items: center; gap: .6rem; margin-top: .6rem; align-self: flex-start; font-size: var(--step--1); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: .4rem .9rem; }
+.hero-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem 1rem; margin-top: .6rem; }
+.views { display: inline-flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 3px; gap: 2px; }
+.views button { font: inherit; font-size: var(--step--1); font-weight: 500; color: var(--muted); background: none; border: 0; border-radius: 999px; padding: .35rem .85rem; cursor: pointer; display: inline-flex; align-items: center; gap: .45rem; white-space: nowrap; }
+.views button:hover { color: var(--ink); }
+.views button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+.views button:disabled { opacity: .5; cursor: not-allowed; }
+.live-dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--ok); }
+.views button[aria-pressed="false"] .live-dot { background: var(--muted); }
+.status-line { display: inline-flex; align-items: center; gap: .6rem; align-self: flex-start; font-size: var(--step--1); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: .4rem .9rem; }
 .status-line .dot { width: .55rem; height: .55rem; border-radius: 50%; background: var(--muted); flex: none; }
 .status-line.is-ok .dot { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
 .status-line.is-warn .dot { background: var(--warn); }
+.status-line.is-running { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); }
+.status-line.is-running .dot { background: var(--warn); }
+@media (prefers-reduced-motion: no-preference) {
+  .status-line.is-running .dot { animation: pulse 1.6s ease-out infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--warn) 55%, transparent); } 100% { box-shadow: 0 0 0 9px transparent; } }
+}
 
 /* bands and sections */
 .band { padding-block: clamp(2rem, 5vw, 3.25rem); }
@@ -210,3 +224,4 @@ code { font-family: var(--font-mono); font-size: .88em; background: var(--surfac
 .foot-note { max-width: 75ch; }
 
 .empty { color: var(--muted); font-size: var(--step--1); padding: 1rem 0; }
+.hosts > .empty, .tiles > .empty { grid-column: 1 / -1; }

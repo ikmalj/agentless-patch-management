@@ -17,9 +17,8 @@ import argparse
 import glob
 import json
 import os
-import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone  # noqa: F401 (timezone used by MYT)
 
 sys.dont_write_bytecode = True
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -46,14 +45,6 @@ def parse_time(text):
 
 def short(host):
     return (host or "").replace("serverless-patch-", "")
-
-
-def commit():
-    try:
-        return subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"], capture_output=True,
-                              text=True, check=True).stdout.strip()
-    except (OSError, subprocess.CalledProcessError):
-        return None
 
 
 def main():
@@ -126,9 +117,10 @@ def main():
         sys.exit("no patch cycles in the selected dates; nothing written")
     host_runs.sort(key=lambda r: r["started"])
     cycles.sort(key=lambda r: r["started"])
+    # No build time or commit in the file: the same evidence always gives the same file, so
+    # running deploy-site.ps1 does not leave site/data/patch-data.js modified in git.
     data = {
-        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "commit": commit(),
+        "view": "evaluation",
         "region": "ap-southeast-5",
         "lambda_limit_s": 900,
         "window": {

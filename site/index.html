@@ -43,14 +43,20 @@
         <li><span class="svc svc-obs">SNS + CloudWatch</span><span class="pipe-note">email and dashboard</span></li>
       </ol>
 
-      <p class="status-line" id="status-line"><span class="dot" aria-hidden="true"></span><span id="status-text">Loading results…</span></p>
+      <div class="hero-controls">
+        <div class="views" role="group" aria-label="Results to show">
+          <button type="button" id="view-live" aria-pressed="true"><span class="live-dot" aria-hidden="true"></span>Live</button>
+          <button type="button" id="view-evaluation" aria-pressed="false">Evaluation <span id="eval-range"></span></button>
+        </div>
+        <p class="status-line" id="status-line" role="status" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="status-text">Loading results…</span></p>
+      </div>
     </div>
   </section>
 
   <section class="band" id="results" aria-labelledby="results-h">
     <div class="wrap">
       <div class="section-head">
-        <h2 id="results-h">Evaluation results</h2>
+        <h2 id="results-h">Results</h2>
         <p class="section-note" id="window-note"></p>
       </div>
       <div class="tiles" id="tiles"></div>
@@ -145,7 +151,7 @@
 <footer class="foot">
   <div class="wrap foot-in">
     <p><strong>Centralized Agentless Patch Management using Serverless Orchestration for Multi-Platform Systems</strong><br>Final Year Project, Bachelor of Computer Science (Hons) Computer Networks, Universiti Teknologi MARA.</p>
-    <p class="foot-note" id="foot-note">Every figure on this page comes from the cycle results in the repository's <code>evidence/</code> folder, counted with the same rules as the <code>serverless-patch-metrics</code> Lambda. A failed run counts its updates as attempted with none fixed. Microsoft Defender updates are excluded from the Windows counts by design. Cost per cycle is estimated in CloudWatch from each execution's history and is not part of the evidence files.</p>
+    <p class="foot-note" id="foot-note"><span id="source-note"></span> Figures are counted with the same rules as the <code>serverless-patch-metrics</code> Lambda. A failed run counts its updates as attempted with none fixed. Microsoft Defender updates are excluded from the Windows counts by design. Cost per cycle is estimated in CloudWatch from each execution's history and is not shown here.</p>
   </div>
 </footer>
 

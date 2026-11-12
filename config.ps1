@@ -33,6 +33,9 @@ $SiteComment      = 'serverless-patch project website'
 $SiteDomain       = 'fyp.ikmaljohari.my'   # custom domain (DNS at Cloudflare); '' for the cloudfront.net address only
 $SiteFrom         = '2026-11-01'           # results shown on the site: first day, YYYY-MM-DD (MYT); '' = from the first run
 $SiteTo           = '2026-11-12'           # last day, inclusive; '' = up to the latest run
+$SitePublisherFn  = 'serverless-patch-site-publisher'   # Live view: rewrites data/live.json after each cycle
+$SitePublisherRole = 'serverless-patch-site-publisher-role'
+$SiteLiveDays     = 30                     # days of results in the Live view
 
 # Host name -> instance ID / private IP / baseline AMI (testbed build record)
 $Hosts = [ordered]@{

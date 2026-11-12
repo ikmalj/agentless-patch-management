@@ -208,18 +208,24 @@ filter record = 'cycle' and mode = 'patch' and hosts_total > 0
 
 ## Project Website
 
-`site/` is a static website that introduces the project and shows the evaluation results: success rate
+`site/` is a static website that introduces the project and shows the patch results: success rate
 overall and per platform, the latest run per host, deployment time per host run, updates fixed by
-severity and every patch cycle. It needs no server and no AWS access.
+severity and every patch cycle. It has two views, switched at the top of the page:
+
+| View | Data | Updates |
+|---|---|---|
+| **Live** (default) | `data/live.json`, last `$SiteLiveDays` days of metrics records | By itself: rewritten when a cycle starts or finishes; open pages re-check every 60 s and show "Patch cycle in progress" while one runs |
+| **Evaluation** (`?view=evaluation`) | `data/patch-data.js`, built from `evidence\` for `$SiteFrom`..`$SiteTo` | Only when `deploy-site.ps1` runs |
 
 | File | Purpose |
 |---|---|
 | `site/index.html` | The page |
 | `site/assets/style.css`, `site/assets/app.js` | Styling and rendering (no libraries) |
-| `site/data/patch-data.js` | Generated data, loaded by the page |
-| `site/build_site_data.py` | Rebuilds the data from `evidence\cycle-patch-*.json` with the counting rules in `lambda/metrics.py` |
+| `site/data/patch-data.js` | Evaluation data, generated (same evidence always gives the same file) |
+| `site/build_site_data.py` | Rebuilds the evaluation data from `evidence\cycle-patch-*.json` with the counting rules in `lambda/metrics.py` |
+| `lambda/site_publisher.py` | Lambda `serverless-patch-site-publisher`: writes `data/live.json` for the Live view |
 
-After new patch runs, rebuild the data and open the page:
+To look at the Evaluation view locally (opened from disk, the page shows Evaluation; Live needs the published site):
 
 ```powershell
 python site\build_site_data.py
@@ -254,6 +260,29 @@ range as its reporting period. Leave both empty to show every patch cycle in `ev
 The URL (`https://<id>.cloudfront.net/`) is printed at the end and saved to `evidence\deploy-site.json`.
 The first deployment takes 5 to 15 minutes to reach the edge locations. Files are uploaded with an
 explicit Content-Type, `build_site_data.py` is not uploaded, and the cache is cleared on every run.
+
+#### Live updates
+
+Step 8 of `deploy-site.ps1` sets up the Live view; nothing changes in the state machine or the patch Lambdas.
+
+```
+serverless-patch-cycle starts / finishes
+   -> EventBridge rule serverless-patch-site-publish (Step Functions Execution Status Change)
+   -> Lambda serverless-patch-site-publisher
+        reads the host and cycle records from /aws/lambda/serverless-patch-metrics (Logs Insights)
+        asks Step Functions which executions are running
+        writes data/live.json to the site bucket, clears /data/live.json in CloudFront
+   -> open pages re-check data/live.json every 60 s
+```
+
+- For a patch cycle that has just succeeded, the publisher waits up to 90 s for its metrics record to
+  become searchable, so a finished cycle is never published as missing.
+- Role `serverless-patch-site-publisher-role` may only query the metrics log group, list and describe
+  executions of `serverless-patch-cycle`, write `data/live.json` and clear the cache of this distribution.
+  No host access, no secrets, no VPC.
+- `live.json` holds the same fields as the evaluation data: no account ID, ARNs, instance IDs or IP addresses.
+- Progress inside a cycle (which host, which step) is not published; that stays on the CloudWatch dashboard.
+- To republish by hand: `aws lambda invoke --function-name serverless-patch-site-publisher --region ap-southeast-5 out.json`.
 
 #### Custom domain (DNS at Cloudflare)
 
