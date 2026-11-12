@@ -77,6 +77,12 @@
   var longest = Math.max.apply(null, runs.filter(isDone).map(function (r) { return r.duration_s; }));
   var starts = cycles.map(function (c) { return c.started; }).sort();
   var firstDay = mytDay(starts[0]), lastDay = mytDay(starts[starts.length - 1]);
+  // A reporting window chosen at build time (--from / --to) is shown as the period, even where
+  // the first or last run falls inside it.
+  function dayLabel(ymd) { var p = ymd.split('-'); return Number(p[2]) + ' ' + MONTHS[Number(p[1]) - 1] + ' ' + p[0]; }
+  var period = DATA.window || {};
+  if (period.from) firstDay = dayLabel(period.from);
+  if (period.to) lastDay = dayLabel(period.to);
 
   // ------------------------------------------------------------ hero status line and window
   var status = $('status-line');

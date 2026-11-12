@@ -23,12 +23,21 @@
 .PARAMETER Domain
   Custom domain for the site, for example patch.example.com. Defaults to $SiteDomain in config.ps1.
 
+.PARAMETER From
+  First day of results to show, YYYY-MM-DD in Malaysia time. Defaults to $SiteFrom in config.ps1;
+  empty means from the first patch cycle in evidence\.
+
+.PARAMETER To
+  Last day of results to show (inclusive), YYYY-MM-DD in Malaysia time. Defaults to $SiteTo in
+  config.ps1; empty means up to the latest patch cycle.
+
 .EXAMPLE
   .\deploy-site.ps1
   .\deploy-site.ps1 -SkipBuild
   .\deploy-site.ps1 -Domain patch.example.com
+  .\deploy-site.ps1 -From 2026-11-01 -To 2026-11-12
 #>
-param([switch]$SkipBuild, [string]$Domain)
+param([switch]$SkipBuild, [string]$Domain, [string]$From, [string]$To)
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\config.ps1"
 Push-Location $PSScriptRoot
@@ -36,6 +45,8 @@ try {
 
 $SiteDir = Join-Path $PSScriptRoot 'site'
 if (-not $Domain) { $Domain = $SiteDomain }
+if (-not $From -and (Get-Variable SiteFrom -ErrorAction SilentlyContinue)) { $From = $SiteFrom }
+if (-not $To -and (Get-Variable SiteTo -ErrorAction SilentlyContinue)) { $To = $SiteTo }
 $Domain = ([string]$Domain).Trim().TrimEnd('.').ToLowerInvariant()
 if ($Domain -and $Domain -notmatch '^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$') {
     throw "'$Domain' is not a valid domain name (use the bare name, e.g. patch.example.com, no https://)"
@@ -57,9 +68,12 @@ if ($SkipBuild) {
     $pyArgs = @()
     if (-not $py) { $py = Get-Command py -ErrorAction SilentlyContinue; $pyArgs = @('-3') }
     if (-not $py) { throw 'Python 3 not found (python or py). Install it, or run with -SkipBuild.' }
-    & $py.Source @pyArgs (Join-Path $SiteDir 'build_site_data.py')
+    $window = @()
+    if ($From) { $window += @('--from', $From) }
+    if ($To)   { $window += @('--to', $To) }
+    & $py.Source @pyArgs (Join-Path $SiteDir 'build_site_data.py') @window
     if ($LASTEXITCODE -ne 0) { throw 'build_site_data.py failed' }
-    Write-Ok 'site\data\patch-data.js rebuilt'
+    Write-Ok ("site\data\patch-data.js rebuilt, results " + $(if ($From -or $To) { "from $(if ($From) { $From } else { 'the first run' }) to $(if ($To) { $To } else { 'the latest run' }) (MYT)" } else { 'from every patch cycle in evidence\' }))
 }
 if (-not (Test-Path (Join-Path $SiteDir 'data\patch-data.js'))) { throw 'site\data\patch-data.js is missing' }
 

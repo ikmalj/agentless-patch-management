@@ -30,7 +30,9 @@ $DashboardUrl     = "https://$Region.console.aws.amazon.com/cloudwatch/home?regi
 $SiteBucket       = "serverless-patch-site-$Account"
 $SiteOacName      = 'serverless-patch-site-oac'
 $SiteComment      = 'serverless-patch project website'
-$SiteDomain       = ''     # optional custom domain, e.g. 'patch.example.com' (DNS at Cloudflare); see deploy-site.ps1
+$SiteDomain       = 'fyp.ikmaljohari.my'   # custom domain (DNS at Cloudflare); '' for the cloudfront.net address only
+$SiteFrom         = '2026-11-01'           # results shown on the site: first day, YYYY-MM-DD (MYT); '' = from the first run
+$SiteTo           = '2026-11-12'           # last day, inclusive; '' = up to the latest run
 
 # Host name -> instance ID / private IP / baseline AMI (testbed build record)
 $Hosts = [ordered]@{

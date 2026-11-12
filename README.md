@@ -247,6 +247,10 @@ the other deploy scripts (safe to run again):
 | CloudFront distribution (comment `serverless-patch project website`) | HTTPS only, AWS managed caching and security-headers policies, `index.html` as root |
 | Bucket policy | `s3:GetObject` for this distribution's ARN only |
 
+The results shown can be limited to a date range (Malaysia time, both days inclusive) with `$SiteFrom` and
+`$SiteTo` in `config.ps1`, or `.\deploy-site.ps1 -From 2026-11-01 -To 2026-11-12`; the page then names that
+range as its reporting period. Leave both empty to show every patch cycle in `evidence\`.
+
 The URL (`https://<id>.cloudfront.net/`) is printed at the end and saved to `evidence\deploy-site.json`.
 The first deployment takes 5 to 15 minutes to reach the edge locations. Files are uploaded with an
 explicit Content-Type, `build_site_data.py` is not uploaded, and the cache is cleared on every run.
