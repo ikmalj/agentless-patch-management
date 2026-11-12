@@ -66,7 +66,7 @@ Region `ap-southeast-5` (Asia Pacific, Malaysia). All resources are tagged `proj
 | `dashboard/dashboard-v3.json` | CloudWatch dashboard `PatchManagement-Dashboard` (template; `dashboard-v2.json` is the earlier layout) |
 | `deploy-framework.ps1` | Deploys the patch Lambdas, IAM roles, state machine and the weekly schedule (created disabled) |
 | `deploy-monitoring.ps1` | Deploys visibility: SNS topic, metrics Lambda, custom widget Lambda, dashboard. `-DashboardOnly` redraws the dashboard |
-| `deploy-site.ps1` | Publishes the project website (`site\`) on CloudFront from a private S3 bucket. `-SkipBuild` uploads without rebuilding the data |
+| `deploy-site.ps1` | Publishes the project website (`site\`) on CloudFront from a private S3 bucket. `-SkipBuild` uploads without rebuilding the data, `-Domain` adds a custom domain |
 | `lab.ps1` | `status`, `start-rhel`, `start-win`, `start-all`, `stop-all`, `endpoint-up`, `endpoint-down` |
 | `test-rhel.ps1`, `test-win.ps1` | Read-only precheck and scan, calling the Lambdas directly |
 | `run-cycle.ps1` | Starts one patch cycle (`-Mode scan` or `-Mode patch`) and follows it to the end |
@@ -250,6 +250,23 @@ the other deploy scripts (safe to run again):
 The URL (`https://<id>.cloudfront.net/`) is printed at the end and saved to `evidence\deploy-site.json`.
 The first deployment takes 5 to 15 minutes to reach the edge locations. Files are uploaded with an
 explicit Content-Type, `build_site_data.py` is not uploaded, and the cache is cleared on every run.
+
+#### Custom domain (DNS at Cloudflare)
+
+Use a subdomain such as `patch.example.com`, or set `$SiteDomain` in `config.ps1` so every run keeps it.
+CloudFront needs an ACM certificate in us-east-1; the script requests it and attaches the domain.
+
+1. `.\deploy-site.ps1 -Domain patch.example.com` requests the certificate and prints a validation CNAME
+   (`_xxxx.patch.example.com` -> `_yyyy.acm-validations.aws`).
+2. In Cloudflare, DNS > Records > Add record: type CNAME, that name and target, proxy status **DNS only**.
+   Keep this record; ACM uses it to renew the certificate every year.
+3. A few minutes later, run `.\deploy-site.ps1 -Domain patch.example.com` again. With the certificate
+   issued it adds the domain to the distribution (TLS 1.2 or later) and prints the second record.
+4. In Cloudflare add CNAME `patch` -> `<id>.cloudfront.net`, proxy status **DNS only**.
+
+Keep both records on **DNS only** (grey cloud). CloudFront already serves HTTPS and caches the site; with
+the Cloudflare proxy on, pages would be cached twice and the script's cache clearing would not reach
+Cloudflare's copy.
 
 The CloudWatch dashboard stays the live operational view and is not made public: a public CloudWatch
 dashboard link would give anyone with the link read access to every metric and EC2 instance name and tag

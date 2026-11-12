@@ -30,6 +30,7 @@ $DashboardUrl     = "https://$Region.console.aws.amazon.com/cloudwatch/home?regi
 $SiteBucket       = "serverless-patch-site-$Account"
 $SiteOacName      = 'serverless-patch-site-oac'
 $SiteComment      = 'serverless-patch project website'
+$SiteDomain       = ''     # optional custom domain, e.g. 'patch.example.com' (DNS at Cloudflare); see deploy-site.ps1
 
 # Host name -> instance ID / private IP / baseline AMI (testbed build record)
 $Hosts = [ordered]@{

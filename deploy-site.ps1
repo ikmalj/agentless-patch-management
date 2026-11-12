@@ -7,26 +7,41 @@
     3. CloudFront Origin Access Control, so only CloudFront can read the bucket
     4. CloudFront distribution (HTTPS only, security headers, index.html as the root)
     5. Bucket policy: s3:GetObject for this distribution only
-    6. Upload site\ and clear the CloudFront cache
+    6. Custom domain (optional): ACM certificate in us-east-1, then the domain on the distribution
+    7. Upload site\ and clear the CloudFront cache
   Safe to run again: every step reuses what already exists. Run it after new patch cycles.
   Does not touch any host, Lambda, state machine or the CloudWatch dashboard.
+
+  Custom domain, DNS at Cloudflare (or any DNS host): the first run with a domain requests the
+  certificate and prints a validation CNAME to add at the DNS host. Run again once the certificate
+  is issued (usually a few minutes after the record is added): the domain is then attached to the
+  distribution and the script prints the CNAME that points the domain at CloudFront.
 
 .PARAMETER SkipBuild
   Upload site\ as it is, without rebuilding the data from evidence\.
 
+.PARAMETER Domain
+  Custom domain for the site, for example patch.example.com. Defaults to $SiteDomain in config.ps1.
+
 .EXAMPLE
   .\deploy-site.ps1
   .\deploy-site.ps1 -SkipBuild
+  .\deploy-site.ps1 -Domain patch.example.com
 #>
-param([switch]$SkipBuild)
+param([switch]$SkipBuild, [string]$Domain)
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\config.ps1"
 Push-Location $PSScriptRoot
 try {
 
 $SiteDir = Join-Path $PSScriptRoot 'site'
+if (-not $Domain) { $Domain = $SiteDomain }
+$Domain = ([string]$Domain).Trim().TrimEnd('.').ToLowerInvariant()
+if ($Domain -and $Domain -notmatch '^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$') {
+    throw "'$Domain' is not a valid domain name (use the bare name, e.g. patch.example.com, no https://)"
+}
 $step = 0
-$total = 7
+$total = 8
 function Next-Step([string]$Text) { $script:step++; Write-Step "$($script:step)/$total $Text" }
 
 # AWS managed CloudFront policies (same IDs in every account)
@@ -135,7 +150,79 @@ Save-Json ([ordered]@{
 Invoke-Aws s3api put-bucket-policy --bucket $SiteBucket --policy file://build/site-bucket-policy.json | Out-Null
 Write-Ok "s3:GetObject for $distArn only"
 
-# ---------------------------------------------------------------- 6. upload and cache
+# ---------------------------------------------------------------- 6. custom domain
+Next-Step 'Custom domain'
+# CloudFront only accepts certificates from ACM in us-east-1, whatever region the bucket is in.
+function Invoke-AwsUsEast1 {
+    $errPath = [System.IO.Path]::GetTempFileName()
+    $raw = & aws @args --region us-east-1 --output json 2>$errPath
+    $code = $LASTEXITCODE
+    $err = Get-Content $errPath -Raw -ErrorAction SilentlyContinue
+    Remove-Item $errPath -ErrorAction SilentlyContinue
+    if ($code -ne 0) { throw "aws $($args -join ' ') (us-east-1) failed (exit $code)`n$err" }
+    $text = ($raw -join "`n").Trim()
+    if ($text) { return $text | ConvertFrom-Json } else { return $null }
+}
+$certArn = $null; $certStatus = $null; $domainLive = $false
+if (-not $Domain) {
+    Write-Ok 'none set (optional: -Domain patch.example.com, or $SiteDomain in config.ps1)'
+} else {
+    $cert = @((Invoke-AwsUsEast1 acm list-certificates --certificate-statuses PENDING_VALIDATION ISSUED).CertificateSummaryList |
+        Where-Object DomainName -eq $Domain) | Select-Object -First 1
+    if ($cert) {
+        $certArn = $cert.CertificateArn
+    } else {
+        $certArn = (Invoke-AwsUsEast1 acm request-certificate --domain-name $Domain --validation-method DNS `
+            --key-algorithm RSA_2048 --tags 'Key=project,Value=serverless-patch').CertificateArn
+        Write-Ok "certificate requested for $Domain"
+    }
+    # The validation record appears a few seconds after the request.
+    $rr = $null
+    for ($try = 1; $try -le 10 -and -not $rr; $try++) {
+        $desc = (Invoke-AwsUsEast1 acm describe-certificate --certificate-arn $certArn).Certificate
+        $certStatus = $desc.Status
+        $rr = ($desc.DomainValidationOptions | Where-Object DomainName -eq $Domain | Select-Object -First 1).ResourceRecord
+        if (-not $rr) { Start-Sleep 3 }
+    }
+    Write-Ok "certificate $certArn"
+    Write-Ok "status $certStatus"
+
+    if ($certStatus -ne 'ISSUED') {
+        if (-not $rr) { throw 'ACM has not produced the validation record yet. Run the script again in a minute.' }
+        Write-Note 'Add this record at your DNS host (Cloudflare: DNS > Records > Add record), then run this script again:'
+        Write-Host ('     Type    CNAME') -ForegroundColor Yellow
+        Write-Host ('     Name    {0}' -f $rr.Name.TrimEnd('.')) -ForegroundColor Yellow
+        Write-Host ('     Target  {0}' -f $rr.Value.TrimEnd('.')) -ForegroundColor Yellow
+        Write-Host  '     Proxy   DNS only (grey cloud)' -ForegroundColor Yellow
+        Write-Note 'ACM checks the record every few minutes. Keep the record afterwards: ACM uses it to renew the certificate.'
+    } else {
+        $dc = Invoke-Aws cloudfront get-distribution-config --id $distId
+        $cfg = $dc.DistributionConfig
+        $aliases = @($cfg.Aliases.Items | Where-Object { $_ })
+        if ($aliases -contains $Domain -and $cfg.ViewerCertificate.ACMCertificateArn -eq $certArn) {
+            Write-Ok "$Domain already attached to $distId"
+        } else {
+            $cfg.Aliases = [pscustomobject]@{ Quantity = 1; Items = @($Domain) }
+            $cfg.ViewerCertificate = [pscustomobject]@{
+                ACMCertificateArn      = $certArn
+                SSLSupportMethod       = 'sni-only'
+                MinimumProtocolVersion = 'TLSv1.2_2021'
+            }
+            Save-Json $cfg (Join-Path $BuildDir 'site-distribution-update.json') -Depth 40
+            Invoke-Aws cloudfront update-distribution --id $distId --if-match $dc.ETag `
+                --distribution-config file://build/site-distribution-update.json | Out-Null
+            Write-Ok "$Domain attached to $distId (TLS 1.2 or later, SNI). CloudFront takes a few minutes to roll this out."
+        }
+        $domainLive = $true
+        Write-Note 'Point the domain at CloudFront at your DNS host (Cloudflare: DNS > Records), if not done yet:'
+        Write-Host  '     Type    CNAME' -ForegroundColor Yellow
+        Write-Host ('     Name    {0}' -f $Domain) -ForegroundColor Yellow
+        Write-Host ('     Target  {0}' -f $distDomain) -ForegroundColor Yellow
+        Write-Host  '     Proxy   DNS only (grey cloud)' -ForegroundColor Yellow
+    }
+}
+
+# ---------------------------------------------------------------- 7. upload and cache
 Next-Step 'Upload site\ and clear the cache'
 # Each file goes up with an explicit Content-Type: CloudFront sends X-Content-Type-Options: nosniff,
 # so a script guessed as text/plain (Windows MIME settings vary) would not run.
@@ -170,9 +257,13 @@ Write-Ok "cache invalidation $($inv.Invalidation.Id) started (/*)"
 # ---------------------------------------------------------------- 7. summary
 Next-Step 'Summary'
 $url = "https://$distDomain/"
+if ($domainLive) { $url = "https://$Domain/" }
 $summary = [ordered]@{
     deployed_at     = (Get-Date).ToString('s')
     url             = $url
+    cloudfront_url  = "https://$distDomain/"
+    custom_domain   = $(if ($Domain) { $Domain } else { $null })
+    certificate     = $(if ($certArn) { "$certArn ($certStatus)" } else { $null })
     distribution_id = $distId
     bucket          = $SiteBucket
     region          = $Region
