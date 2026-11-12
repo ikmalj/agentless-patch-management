@@ -66,6 +66,7 @@ Region `ap-southeast-5` (Asia Pacific, Malaysia). All resources are tagged `proj
 | `dashboard/dashboard-v3.json` | CloudWatch dashboard `PatchManagement-Dashboard` (template; `dashboard-v2.json` is the earlier layout) |
 | `deploy-framework.ps1` | Deploys the patch Lambdas, IAM roles, state machine and the weekly schedule (created disabled) |
 | `deploy-monitoring.ps1` | Deploys visibility: SNS topic, metrics Lambda, custom widget Lambda, dashboard. `-DashboardOnly` redraws the dashboard |
+| `deploy-site.ps1` | Publishes the project website (`site\`) on CloudFront from a private S3 bucket. `-SkipBuild` uploads without rebuilding the data |
 | `lab.ps1` | `status`, `start-rhel`, `start-win`, `start-all`, `stop-all`, `endpoint-up`, `endpoint-down` |
 | `test-rhel.ps1`, `test-win.ps1` | Read-only precheck and scan, calling the Lambdas directly |
 | `run-cycle.ps1` | Starts one patch cycle (`-Mode scan` or `-Mode patch`) and follows it to the end |
@@ -229,8 +230,30 @@ The generated data holds only what the page shows: no account ID, ARNs, instance
 Cost per cycle is not shown, because it is estimated from the execution history in CloudWatch and is
 not saved in `evidence\`.
 
-To publish, upload the contents of `site\` to any static host, for example an S3 bucket with static
-website hosting or GitHub Pages (Pages on a private repository needs a paid GitHub plan).
+### Publishing
+
+`deploy-site.ps1` publishes the site on CloudFront, in the same account and with the same conventions as
+the other deploy scripts (safe to run again):
+
+```powershell
+.\deploy-site.ps1             # rebuild the data from evidence\, upload, clear the cache
+.\deploy-site.ps1 -SkipBuild  # upload site\ as it is
+```
+
+| Piece | Setting |
+|---|---|
+| S3 bucket `serverless-patch-site-<account>` (ap-southeast-5) | Private: all public access blocked, ACLs disabled |
+| CloudFront Origin Access Control `serverless-patch-site-oac` | Only CloudFront can read the bucket (SigV4) |
+| CloudFront distribution (comment `serverless-patch project website`) | HTTPS only, AWS managed caching and security-headers policies, `index.html` as root |
+| Bucket policy | `s3:GetObject` for this distribution's ARN only |
+
+The URL (`https://<id>.cloudfront.net/`) is printed at the end and saved to `evidence\deploy-site.json`.
+The first deployment takes 5 to 15 minutes to reach the edge locations. Files are uploaded with an
+explicit Content-Type, `build_site_data.py` is not uploaded, and the cache is cleared on every run.
+
+The CloudWatch dashboard stays the live operational view and is not made public: a public CloudWatch
+dashboard link would give anyone with the link read access to every metric and EC2 instance name and tag
+in the account. To show it to a supervisor, share it with named email addresses instead.
 
 ## Safety Defaults
 

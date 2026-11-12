@@ -26,6 +26,11 @@ $NotifyEmail      = 'ikmalj.tech@gmail.com'
 $DashboardName    = 'PatchManagement-Dashboard'
 $DashboardUrl     = "https://$Region.console.aws.amazon.com/cloudwatch/home?region=$Region#dashboards/dashboard/$DashboardName"
 
+# Project website (site/): private S3 bucket behind CloudFront with Origin Access Control
+$SiteBucket       = "serverless-patch-site-$Account"
+$SiteOacName      = 'serverless-patch-site-oac'
+$SiteComment      = 'serverless-patch project website'
+
 # Host name -> instance ID / private IP / baseline AMI (testbed build record)
 $Hosts = [ordered]@{
     'rhel-01' = @{ Id = 'i-0ba983a12665d852f'; Ip = '10.0.1.175'; Ami = 'ami-0bf7b60a5f0dc4edc'; Name = 'serverless-patch-rhel-01'; Workload = 'nginx' }

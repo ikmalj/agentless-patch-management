@@ -1,11 +1,11 @@
 /* Renders the patch results in window.PATCH_DATA (site/data/patch-data.js).
    Same counting rules as lambda/summary_widget.py: success = verified fixed / attempted,
-   colours green from 95 %, amber from 80 %, red below. */
+   colours green from 90 %, amber from 80 %, red below (as the CloudWatch dashboard). */
 (function () {
   'use strict';
 
   var DATA = window.PATCH_DATA;
-  var RATE_GOOD = 95, RATE_WARN = 80;
+  var RATE_GOOD = 90, RATE_WARN = 80;
   var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   var STATUS = {
     patched: ['PATCHED', 'ok'], patched_partial: ['PARTIAL', 'warn'], failed: ['FAILED', 'bad'],
@@ -99,7 +99,7 @@
     var m = el('div', 'meter');
     m.setAttribute('aria-hidden', 'true');
     var fill = el('span'); fill.style.width = (r.pct || 0).toFixed(1) + '%';
-    var mark = el('i'); mark.style.left = RATE_GOOD + '%'; mark.title = 'Target 95%';
+    var mark = el('i'); mark.style.left = RATE_GOOD + '%'; mark.title = 'Green from ' + RATE_GOOD + '%';
     m.appendChild(fill); m.appendChild(mark);
     t.appendChild(m);
     t.appendChild(el('p', 'tile-sub', nf.format(r.ok) + ' of ' + nf.format(r.att) + ' ' + unit + ' verified · ' + r.runs + ' host runs'));
