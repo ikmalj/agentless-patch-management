@@ -224,6 +224,8 @@ redrawn from the same records and metrics, following its Logs Insights query or 
 |---|---|
 | `site/index.html` | The page |
 | `site/assets/style.css`, `site/assets/dashboard.css`, `site/assets/app.js` | Page styling, CloudWatch-style dashboard styling, dashboard rendering (no libraries) |
+| `site/assets/theme.js` | Auto / Light / Dark switch |
+| `site/assets/og.png`, `favicon.svg`, `apple-touch-icon.png` | Link preview picture (1200x630) and icons; the picture is rendered from `site-src/og-card.html` (not published) |
 | `site/data/patch-data.js` | Fallback evaluation data from `evidence\` (same evidence always gives the same file) |
 | `site/build_site_data.py` | Builds that fallback: evidence reports -> metrics records (`lambda/metrics.py`) -> the publisher's format |
 | `lambda/site_publisher.py` | Lambda `serverless-patch-site-publisher`: writes `data/live.json` and `data/evaluation.json` |

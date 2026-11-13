@@ -5,6 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Agentless Patch Management</title>
 <meta name="description" content="Centralized agentless patch management for RHEL 9 and Windows Server 2022 using AWS EventBridge, Step Functions and Lambda, with its live CloudWatch dashboard.">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<meta name="theme-color" content="#0d1117">
+<!-- Link preview (Threads, LinkedIn, WhatsApp, X). Image source: site-src/og-card.html -->
+<link rel="canonical" href="https://fyp.ikmaljohari.my/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="serverless-patch">
+<meta property="og:url" content="https://fyp.ikmaljohari.my/">
+<meta property="og:title" content="Centralized agentless patch management">
+<meta property="og:description" content="RHEL 9 and Windows Server 2022 patched by AWS Step Functions and Lambda with no agent on any host. Live CloudWatch dashboard: 99.8% of updates verified fixed in the 1–12 Nov 2026 evaluation.">
+<meta property="og:image" content="https://fyp.ikmaljohari.my/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="serverless-patch: centralized agentless patch management. 99.8% of updates verified fixed, 17 patch cycles, 3 of 3 hosts fully patched.">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Open+Sans:wght@400;600;700&display=swap">
@@ -39,6 +54,7 @@
       <p class="eyebrow">Final Year Project · AWS ap-southeast-5 (Malaysia)</p>
       <h1>Centralized agentless patch management</h1>
       <p class="lede">One serverless workflow patches Red Hat Enterprise Linux 9 and Windows Server 2022 over SSH and WinRM, checks every update with a rescan, and reports the result. Nothing is installed on the hosts.</p>
+      <p class="status-line hero-status" id="hero-status"><span class="dot" aria-hidden="true"></span><span id="hero-status-text">Checking the latest patch results…</span> <a href="#dashboard">Open the dashboard ↓</a></p>
 
       <ol class="pipeline" aria-label="Patch cycle pipeline">
         <li><span class="svc svc-trigger">EventBridge Scheduler</span><span class="pipe-note">weekly or one-time trigger</span></li>

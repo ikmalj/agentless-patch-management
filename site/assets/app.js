@@ -28,10 +28,10 @@
     { id: 'hosts', x: 0, y: 7, w: 16, h: 7, type: 'custom', title: 'Host Status: latest patch run per host' },
     { id: 'severity', x: 16, y: 7, w: 8, h: 7, type: 'custom', title: 'Updates Fixed by Severity (verified by rescan)' },
     { id: 'hostGauge', x: 0, y: 14, w: 5, h: 6, title: 'Selected host {host}: success rate' },
-    { id: 'hostTime', x: 5, y: 14, w: 9, h: 6, title: 'Selected host {host}: deployment time per run (s)' },
+    { id: 'hostTime', x: 5, y: 14, w: 9, h: 6, title: 'Selected host {host}: deployment time per run (s)', scale: true },
     { id: 'hostHistory', x: 14, y: 14, w: 10, h: 6, title: 'Selected host {host}: run history', table: true },
-    { id: 'barHost', x: 0, y: 20, w: 8, h: 7, title: 'Patch Deployment Time per Host (Experiment 1, longest run in range, s)' },
-    { id: 'timeAll', x: 8, y: 20, w: 16, h: 7, title: 'Deployment Time per Run (each point is one host in one patch run, s)' },
+    { id: 'barHost', x: 0, y: 20, w: 8, h: 7, title: 'Patch Deployment Time per Host (Experiment 1, longest run in range, s)', scale: true },
+    { id: 'timeAll', x: 8, y: 20, w: 16, h: 7, title: 'Deployment Time per Run (each point is one host in one patch run, s)', scale: true },
     { id: 'pie', x: 0, y: 27, w: 6, h: 7, title: 'Host Outcomes (patch runs)' },
     { id: 'exp3', x: 6, y: 27, w: 9, h: 7, title: 'Scalability Across Multiple Hosts (Experiment 3, RHEL full-scope runs, x = hosts in run)' },
     { id: 'orch', x: 15, y: 27, w: 9, h: 7, title: 'Orchestration Layer (Step Functions, Lambda, SNS)' },
@@ -147,31 +147,55 @@
     var wrap = el('div', 'cw-chart');
     body.appendChild(wrap);
     var legend = opts.legend ? el('div', 'cw-legend') : null;
-    var W = Math.max(200, body.clientWidth - 32), H = Math.max(140, body.clientHeight - 16 - (legend ? 26 : 0));
+    var foot = opts.footnote ? el('p', 'cw-foot', opts.footnote) : null;
+    var W = Math.max(200, body.clientWidth - 32), H = Math.max(120, body.clientHeight - 16 - (legend ? 26 : 0) - (foot ? 20 : 0));
     var s = svg('svg', { viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, role: 'img', 'aria-label': opts.label || '' });
     wrap.appendChild(s);
     if (legend) wrap.appendChild(legend);
+    if (foot) wrap.appendChild(foot);
     return { svg: s, W: W, H: H, legend: legend };
   }
-  function yAxis(f, max, left, top, bottom, label) {
-    var tv = ticks(max, 4), H = f.H;
-    function y(v) { return H - bottom - v / max * (H - bottom - top); }
-    tv.forEach(function (t) {
+  // A y scale: linear from 0, or log10 between powers of ten (for durations where one long
+  // run would otherwise flatten every other point against the axis).
+  function yScale(values, floor, log) {
+    var top = Math.max.apply(null, [floor].concat(values));
+    if (!log) { var max = niceMax(top * 1.05); return { log: false, lo: 0, hi: max, ticks: ticks(max, 4) }; }
+    var pos = values.filter(function (v) { return v > 0; });
+    var lo = Math.pow(10, Math.floor(Math.log10(Math.max(1, Math.min.apply(null, pos.length ? pos : [10])))));
+    var hi = Math.pow(10, Math.ceil(Math.log10(top * 1.05)));
+    var tv = []; for (var t = lo; t <= hi; t *= 10) tv.push(t);
+    return { log: true, lo: lo, hi: hi, ticks: tv };
+  }
+  function yAxis(f, sc, left, top, bottom, label) {
+    var H = f.H, span = H - bottom - top;
+    function y(v) {
+      if (!sc.log) return H - bottom - v / sc.hi * span;
+      var lv = Math.log10(Math.max(v, sc.lo));
+      return H - bottom - (lv - Math.log10(sc.lo)) / (Math.log10(sc.hi) - Math.log10(sc.lo)) * span;
+    }
+    y.base = sc.log ? sc.lo : 0;
+    sc.ticks.forEach(function (t) {
       f.svg.appendChild(svg('line', { x1: left, x2: f.W - 6, y1: y(t), y2: y(t), stroke: css('--cw-grid'), 'stroke-width': 1 }));
       f.svg.appendChild(svg('text', { x: left - 6, y: y(t), dy: '0.32em', 'text-anchor': 'end' }, t.toLocaleString('en')));
     });
-    if (label) f.svg.appendChild(svg('text', { x: 10, y: (top + H - bottom) / 2, transform: 'rotate(-90 10 ' + ((top + H - bottom) / 2) + ')', 'text-anchor': 'middle' }, label));
+    if (label) {
+      var mid = (top + H - bottom) / 2;
+      f.svg.appendChild(svg('text', { x: 10, y: mid, transform: 'rotate(-90 10 ' + mid + ')', 'text-anchor': 'middle' }, label + (sc.log ? ' (log scale)' : '')));
+    }
     return y;
   }
-  function leftMargin(f, max, label) {
-    var probe = svg('text', {}, ticks(max, 4).slice(-1)[0].toLocaleString('en')); f.svg.appendChild(probe);
+  function leftMargin(f, sc, label) {
+    var probe = svg('text', {}, sc.ticks[sc.ticks.length - 1].toLocaleString('en')); f.svg.appendChild(probe);
     var w = probe.getComputedTextLength(); f.svg.removeChild(probe);
     return Math.ceil(w) + 12 + (label ? 16 : 0);
   }
   function annotation(f, y, x0, x1, value, colour, text) {
     f.svg.appendChild(svg('line', { x1: x0, x2: x1, y1: y(value), y2: y(value), stroke: colour, 'stroke-width': 1.5 }));
     if (text) {
-      var t = svg('text', { x: x0 + 4, y: y(value) - 5 }, text); t.style.fill = colour; f.svg.appendChild(t);
+      // A halo in the panel colour keeps the label readable where it crosses a bar or a line.
+      var t = svg('text', { x: x0 + 4, y: y(value) - 5, 'paint-order': 'stroke', 'stroke-width': 3, 'stroke-linejoin': 'round' },
+        (x1 - x0) < 380 ? 'Lambda limit 900 s' : text);
+      t.style.fill = colour; t.style.stroke = css('--cw-panel'); f.svg.appendChild(t);
     }
   }
   function legendItem(f, colour, text, square) {
@@ -200,17 +224,18 @@
     var all = []; series.forEach(function (s) { all = all.concat(s.points); });
     if (!all.length) { note(body, 'No data available.'); return; }
     var f = frame(body, { legend: opts.legend, label: opts.label });
-    var max = niceMax(Math.max(LIMIT_S * 1.08, Math.max.apply(null, all.map(function (p) { return p.v; })) * 1.05));
-    var left = leftMargin(f, max, opts.yLabel), top = 14, bottom = 22, right = f.W - 6;
-    var y = yAxis(f, max, left, top, bottom, opts.yLabel);
+    var sc = yScale(all.map(function (p) { return p.v; }), LIMIT_S * 1.08, opts.log);
+    var left = leftMargin(f, sc, opts.yLabel), top = 14, bottom = 22, right = f.W - 6;
+    var y = yAxis(f, sc, left, top, bottom, opts.yLabel);
     var x = timeAxis(f, opts.start, opts.end, left, right, bottom);
     annotation(f, y, left, right, LIMIT_S, RED, LIMIT_LABEL);
     var dots = [];
     series.forEach(function (s) {
       var pts = s.points.slice().sort(function (a, b) { return a.t - b.t; });
-      if (pts.length > 1) f.svg.appendChild(svg('polyline', { points: pts.map(function (p) { return x(p.t) + ',' + y(p.v); }).join(' '), fill: 'none', stroke: s.colour, 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+      // Runs are days apart, so the line between them is not a measurement: keep it faint.
+      if (pts.length > 1) f.svg.appendChild(svg('polyline', { points: pts.map(function (p) { return x(p.t) + ',' + y(p.v); }).join(' '), fill: 'none', stroke: s.colour, 'stroke-width': 1.25, 'stroke-opacity': 0.35, 'stroke-linejoin': 'round' }));
       pts.forEach(function (p) {
-        var c = svg('circle', { cx: x(p.t), cy: y(p.v), r: 3, fill: s.colour });
+        var c = svg('circle', { cx: x(p.t), cy: y(p.v), r: 3.5, fill: s.colour });
         f.svg.appendChild(c); dots.push({ c: c, p: p, s: s, cx: x(p.t), cy: y(p.v) });
       });
       if (f.legend) legendItem(f, s.colour, s.name);
@@ -224,33 +249,33 @@
       var b = f.svg.getBoundingClientRect(), k = f.W / b.width;
       var px = (ev.clientX - b.left) * k, py = (ev.clientY - b.top) * k, best = null, bd = 900 * k * k;
       dots.forEach(function (d) { var q = (d.cx - px) * (d.cx - px) + (d.cy - py) * (d.cy - py); if (q < bd) { bd = q; best = d; } });
-      dots.forEach(function (d) { d.c.setAttribute('r', d === best ? 5 : 3); });
+      dots.forEach(function (d) { d.c.setAttribute('r', d === best ? 5.5 : 3.5); });
       if (!best) { hideTip(); return; }
       showTip(lines(best), b.left + window.scrollX + best.cx / k, b.top + window.scrollY + best.cy / k);
     });
-    f.svg.addEventListener('pointerleave', function () { hideTip(); dots.forEach(function (d) { d.c.setAttribute('r', 3); }); });
+    f.svg.addEventListener('pointerleave', function () { hideTip(); dots.forEach(function (d) { d.c.setAttribute('r', 3.5); }); });
   }
 
   function barChart(body, groups, seriesNames, opts) {  // groups: [{label, values:[...]}]
     if (!groups.length) { note(body, 'No data available.'); return; }
-    var f = frame(body, { legend: true, label: opts.label });
+    var f = frame(body, { legend: true, label: opts.label, footnote: opts.footnote });
     var vals = []; groups.forEach(function (g) { vals = vals.concat(g.values); });
-    var max = niceMax(Math.max(opts.limit ? LIMIT_S * 1.08 : 0, Math.max.apply(null, vals) * 1.05));
-    var left = leftMargin(f, max, opts.yLabel), top = 14, bottom = opts.xLabels ? 22 : 8, right = f.W - 6;
-    var y = yAxis(f, max, left, top, bottom, opts.yLabel);
+    var sc = yScale(vals, opts.limit ? LIMIT_S * 1.08 : 0, opts.log);
+    var left = leftMargin(f, sc, opts.yLabel), top = 14, bottom = opts.xLabels ? 22 : 8, right = f.W - 6;
+    var y = yAxis(f, sc, left, top, bottom, opts.yLabel);
     var gw = (right - left) / groups.length, n = seriesNames.length;
     var bw = Math.min(56, (gw * 0.7) / n);
     groups.forEach(function (g, gi) {
       var gx = left + gi * gw + (gw - bw * n) / 2;
       g.values.forEach(function (v, si) {
         var colour = opts.colours ? opts.colours[gi] : PALETTE[si % PALETTE.length];
-        var r = svg('rect', { x: gx + si * bw, y: y(v), width: Math.max(1, bw - 2), height: Math.max(0, y(0) - y(v)), fill: colour });
+        var r = svg('rect', { x: gx + si * bw, y: y(v), width: Math.max(1, bw - 2), height: Math.max(0, y(y.base) - y(v)), fill: colour });
         f.svg.appendChild(r);
         tipAt(r, [{ text: opts.xLabels ? opts.xLabels(g) : g.label }, { text: seriesNames[si] + ': ' + cell(v), colour: colour }]);
       });
       if (opts.xLabels) f.svg.appendChild(svg('text', { x: left + gi * gw + gw / 2, y: f.H - bottom + 16, 'text-anchor': 'middle' }, opts.xLabels(g)));
     });
-    f.svg.appendChild(svg('line', { x1: left, x2: right, y1: y(0), y2: y(0), stroke: css('--cw-axis') }));
+    f.svg.appendChild(svg('line', { x1: left, x2: right, y1: y(y.base), y2: y(y.base), stroke: css('--cw-axis') }));
     if (opts.limit) annotation(f, y, left, right, LIMIT_S, RED, LIMIT_LABEL);
     if (opts.colours) groups.forEach(function (g, gi) { legendItem(f, opts.colours[gi], g.label, true); });
     else seriesNames.forEach(function (n2, si) { legendItem(f, PALETTE[si % PALETTE.length], n2, true); });
@@ -319,17 +344,25 @@
     arc(0, 100, r - 10, css('--cw-grid'), 18);
     arc(0, Math.min(100, pct), r - 10, GREEN, 18);
     arc(0, 80, r + 3, RED, 4); arc(80, 90, r + 3, ORANGE, 4); arc(90, 100, r + 3, GREEN, 4);
-    var v = svg('text', { x: cx, y: cy - 8, 'text-anchor': 'middle' }, (Math.round(pct * 100) / 100).toLocaleString('en'));
+    var v = svg('text', { x: cx, y: cy - 8, 'text-anchor': 'middle' }, (Math.round(pct * 100) / 100).toLocaleString('en') + '%');
     v.style.cssText = 'font-size:' + Math.max(18, Math.min(34, r / 3)) + 'px;fill:var(--cw-text)'; f.svg.appendChild(v);
     f.svg.appendChild(svg('text', { x: cx - r + 10, y: cy + 16, 'text-anchor': 'middle' }, '0'));
     f.svg.appendChild(svg('text', { x: cx + r - 10, y: cy + 16, 'text-anchor': 'middle' }, '100'));
     legendItem(f, GREEN, 'Verified / attempted (%)');
   };
+  // Deployment-time charts share one Log scale switch. Left alone, it turns on when the longest
+  // run is over 4x the median, so one long Windows run does not flatten every RHEL run.
+  function useLog() {
+    if (state.log != null) return state.log;
+    var v = hostRecs(state.data).filter(hostSeconds).map(function (r) { return num(r.duration_s); }).sort(function (a, b) { return a - b; });
+    if (v.length < 3) return false;
+    return v[v.length - 1] > 4 * v[Math.floor(v.length / 2)];
+  }
   W.hostTime = function (body) {
     var pts = hostRecs(state.data).filter(function (r) { return hostSeconds(r) && r.host === state.host; })
       .map(function (r) { return { t: tsMs(r._ts), v: num(r.duration_s), ts: r._ts }; });
     lineChart(body, [{ name: 'Deployment time (s)', colour: GREY, points: pts }],
-      { start: Date.parse(state.data.range.start), end: Date.parse(state.data.range.end), label: 'Deployment time per run' });
+      { log: useLog(), start: Date.parse(state.data.range.start), end: Date.parse(state.data.range.end), label: 'Deployment time per run' });
   };
   var HIST_COLS = ['@timestamp', 'mode', 'status', 'unit', 'before', 'after', 'succeeded', 'attempted', 'duration_s', 'rebooted', 'healthy', 'failed_at'];
   W.hostHistory = function (body) {
@@ -346,10 +379,10 @@
   W.barHost = function (body) {
     var s = seriesByHost();
     barChart(body, s.map(function (x) { return { label: x.name, values: [Math.max.apply(null, x.points.map(function (p) { return p.v; }))] }; }),
-      ['Longest run (s)'], { limit: true, yLabel: 'seconds', colours: s.map(function (x) { return x.colour; }), label: 'Longest deployment per host' });
+      ['Longest run (s)'], { log: useLog(), limit: true, yLabel: 'seconds', colours: s.map(function (x) { return x.colour; }), label: 'Longest deployment per host' });
   };
   W.timeAll = function (body) {
-    lineChart(body, seriesByHost(), { legend: true, yLabel: 'seconds', start: Date.parse(state.data.range.start), end: Date.parse(state.data.range.end), label: 'Deployment time per run' });
+    lineChart(body, seriesByHost(), { log: useLog(), legend: true, yLabel: 'seconds', start: Date.parse(state.data.range.start), end: Date.parse(state.data.range.end), label: 'Deployment time per run' });
   };
   W.pie = function (body) {
     var counts = {};
@@ -382,7 +415,10 @@
       var g = byN[n], avg = function (k) { return g.reduce(function (a, x) { return a + x[k]; }, 0) / g.length; };
       return { label: String(n), values: [avg('run_s'), avg('host_s')] };
     });
-    barChart(body, groups, ['total_workflow_s', 'per_host_s'], { xLabels: function (g) { return 'hosts_in_run ' + g.label; }, label: 'Scalability' });
+    barChart(body, groups, ['total_workflow_s', 'per_host_s'], {
+      xLabels: function (g) { return 'hosts_in_run ' + g.label; }, label: 'Scalability',
+      footnote: groups.length === 1 ? 'Only ' + groups[0].label + '-host runs in this range, so there is no host count to compare yet.' : null,
+    });
   };
   W.orch = function (body) {
     var m = state.data.metrics;
@@ -404,9 +440,9 @@
     var days = m.per_day || [];
     if (!days.length) { note(body, 'No data available.'); return; }
     var f = frame(body, { legend: true, label: 'Executions per day' });
-    var max = niceMax(Math.max(1, Math.max.apply(null, days.map(function (d) { return d.succeeded + d.failed; }))) * 1.1);
-    var left = leftMargin(f, max), top = 10, bottom = 22, right = f.W - 6;
-    var y = yAxis(f, max, left, top, bottom);
+    var sc = yScale(days.map(function (d) { return d.succeeded + d.failed; }), 1, false);
+    var left = leftMargin(f, sc), top = 10, bottom = 22, right = f.W - 6;
+    var y = yAxis(f, sc, left, top, bottom);
     var x = timeAxis(f, Date.parse(state.data.range.start), Date.parse(state.data.range.end), left, right, bottom);
     var pts = days.map(function (d) { return { t: Date.parse(d.day + 'T00:00:00Z'), s: d.succeeded, f: d.failed, day: d.day }; });
     function area(lo, hi, colour) {
@@ -470,12 +506,42 @@
       if (spec.title) {
         var head = el('header', 'cw-wh'); head.appendChild(el('h3', null, title(spec))); w.appendChild(head);
         w.setAttribute('aria-label', title(spec));
+        if (spec.scale) {
+          var btn = el('button', 'cw-tool', 'Log scale');
+          btn.type = 'button';
+          btn.setAttribute('aria-pressed', String(useLog()));
+          btn.title = 'Log scale shows short and long runs together. Applies to all deployment-time charts.';
+          btn.addEventListener('click', function () { state.log = !useLog(); render(); });
+          head.appendChild(btn);
+        }
       }
       var body = el('div', 'cw-wb' + (spec.table ? ' cw-tbl' : '') + (spec.type || spec.table ? '' : ' cw-fill'));
       w.appendChild(body);
       grid.appendChild(w);
       try { W[spec.id](body); } catch (e) { body.replaceChildren(); note(body, 'This widget could not be drawn.'); if (window.console) console.error(spec.id, e); }
+      if (spec.table) moreHint(w, body);
     });
+  }
+
+  // A table wider than its widget: fade the right edge and offer a "more columns" button, so the
+  // hidden columns are not mistaken for missing ones.
+  function moreHint(w, body) {
+    var head = w.querySelector('.cw-wh');
+    var fade = el('div', 'cw-fade'); fade.setAttribute('aria-hidden', 'true');
+    var more = el('button', 'cw-more', '›'); more.type = 'button';
+    more.setAttribute('aria-label', 'Show more columns'); more.title = 'More columns';
+    var headH = head ? head.offsetHeight : 0;
+    fade.style.top = headH + 'px';
+    more.style.top = Math.round(headH + body.clientHeight / 2 - 13) + 'px';
+    w.appendChild(fade); w.appendChild(more);
+    function update() {
+      var hidden = body.scrollWidth - body.clientWidth - body.scrollLeft > 4;
+      fade.classList.toggle('on', hidden); more.classList.toggle('on', hidden);
+      more.tabIndex = hidden ? 0 : -1;
+    }
+    more.addEventListener('click', function () { body.scrollBy({ left: Math.max(160, body.clientWidth * 0.6), behavior: 'smooth' }); });
+    body.addEventListener('scroll', update, { passive: true });
+    update();
   }
 
   // ------------------------------------------------------------ host selector (the dashboard's var_host)
@@ -507,24 +573,36 @@
   });
 
   // ------------------------------------------------------------ status line
-  function drawStatus() {
-    var line = $('status-line'), text = $('status-text'), d = state.data;
-    line.classList.remove('is-ok', 'is-warn', 'is-running');
-    if (!d) { text.textContent = 'No results to show yet.'; return; }
+  // One status sentence for a data set: {cls, text}. Used by the dashboard and by the line under
+  // the page title, which always speaks for the live data when there is any.
+  function statusFor(d, view) {
+    if (!d) return { cls: '', text: 'No results to show yet.' };
     var st = d.status || {};
-    if (state.view === 'live' && st.state === 'running') {
-      line.classList.add('is-running');
-      text.textContent = (st.mode === 'patch' ? 'Patch cycle' : 'Scan') + ' in progress · started ' + clock(st.since) + ' MYT (' + ago(st.since) + ')' +
-        (st.count > 1 ? ' · ' + st.count + ' runs' : '') + ' · this dashboard updates when it finishes';
-      return;
+    if (view === 'live' && st.state === 'running') {
+      return { cls: 'is-running', text: (st.mode === 'patch' ? 'Patch cycle' : 'Scan') + ' in progress · started ' + clock(st.since) + ' MYT (' + ago(st.since) + ')' +
+        (st.count > 1 ? ' · ' + st.count + ' runs' : '') + ' · the dashboard updates when it finishes' };
     }
     var latest = {};
     hostRecs(d).forEach(function (r) { if (r.mode === 'patch' && r.host && !latest[r.host]) latest[r.host] = r; });
     var hosts = Object.keys(latest), clean = hosts.filter(function (h) { return latest[h].after === 0; }).length;
-    line.classList.add(hosts.length && clean === hosts.length ? 'is-ok' : 'is-warn');
     var base = hosts.length ? 'Latest patch run on each host: ' + clean + ' of ' + hosts.length + ' hosts with no missing updates' : 'No patch runs in this range';
-    if (state.view === 'live') text.textContent = base + ' · updated ' + ago(d.generated_at);
-    else text.textContent = base + ' · ' + (d.source === 'evidence' ? 'from the evidence files (cost and orchestration counts only on the published site)' : 'from CloudWatch');
+    return {
+      cls: hosts.length && clean === hosts.length ? 'is-ok' : 'is-warn',
+      text: view === 'live' ? base + ' · updated ' + ago(d.generated_at)
+        : base + ' · ' + (d.source === 'evidence' ? 'from the evidence files (cost and orchestration counts only on the published site)' : 'from CloudWatch'),
+    };
+  }
+  function paint(line, text, s) {
+    line.classList.remove('is-ok', 'is-warn', 'is-running');
+    if (s.cls) line.classList.add(s.cls);
+    text.textContent = s.text;
+  }
+  function drawStatus() {
+    paint($('status-line'), $('status-text'), statusFor(state.data, state.view));
+    var hero = state.live ? statusFor(state.live, 'live')
+      : (state.data ? statusFor(state.data, state.view) : { cls: '', text: 'Checking the latest patch results…' });
+    if (!state.live && state.data && state.data.range) hero.text = hero.text.replace(/ · .*$/, '') + ' · ' + state.data.range.label;
+    paint($('hero-status'), $('hero-status-text'), hero);
   }
   function show(d) {
     state.data = d;
