@@ -23,24 +23,23 @@
 
   // The dashboard layout, as in dashboard/dashboard-v3.json (x, y, width, height on a 24-column grid).
   var LAYOUT = [
-    { id: 'header', x: 0, y: 0, w: 24, h: 3, type: 'text' },
-    { id: 'kpi', x: 0, y: 3, w: 24, h: 4, type: 'custom', title: 'Patch Summary' },
-    { id: 'hosts', x: 0, y: 7, w: 16, h: 7, type: 'custom', title: 'Host Status: latest patch run per host' },
-    { id: 'severity', x: 16, y: 7, w: 8, h: 7, type: 'custom', title: 'Updates Fixed by Severity (verified by rescan)' },
-    { id: 'hostGauge', x: 0, y: 14, w: 5, h: 6, title: 'Selected host {host}: success rate' },
-    { id: 'hostTime', x: 5, y: 14, w: 9, h: 6, title: 'Selected host {host}: deployment time per run (s)', scale: true },
-    { id: 'hostHistory', x: 14, y: 14, w: 10, h: 6, title: 'Selected host {host}: run history', table: true },
-    { id: 'barHost', x: 0, y: 20, w: 8, h: 7, title: 'Patch Deployment Time per Host (Experiment 1, longest run in range, s)', scale: true },
-    { id: 'timeAll', x: 8, y: 20, w: 16, h: 7, title: 'Deployment Time per Run (each point is one host in one patch run, s)', scale: true },
-    { id: 'pie', x: 0, y: 27, w: 6, h: 7, title: 'Host Outcomes (patch runs)' },
-    { id: 'exp3', x: 6, y: 27, w: 9, h: 7, title: 'Scalability Across Multiple Hosts (Experiment 3, RHEL full-scope runs, x = hosts in run)' },
-    { id: 'orch', x: 15, y: 27, w: 9, h: 7, title: 'Orchestration Layer (Step Functions, Lambda, SNS)' },
-    { id: 'perDay', x: 0, y: 34, w: 12, h: 6, title: 'Step Functions Executions per Day' },
-    { id: 'platform', x: 12, y: 34, w: 12, h: 6, title: 'Success Rate by Platform (from CloudWatch Logs)', table: true },
-    { id: 'costSv', x: 0, y: 40, w: 6, h: 6, title: 'Estimated Operational Cost (Experiment 4, USD)' },
-    { id: 'costTable', x: 6, y: 40, w: 18, h: 6, title: 'Cost per Cycle (list price before free tier)', table: true },
-    { id: 'latest', x: 0, y: 46, w: 24, h: 7, title: 'Latest Host Results (scan and patch runs)', table: true },
-    { id: 'footer', x: 0, y: 53, w: 24, h: 2, type: 'text', plain: true },
+    { id: 'kpi', x: 0, y: 0, w: 24, h: 4, type: 'custom', title: 'Patch Summary' },
+    { id: 'hosts', x: 0, y: 4, w: 16, h: 7, type: 'custom', title: 'Host Status: latest patch run per host' },
+    { id: 'severity', x: 16, y: 4, w: 8, h: 7, type: 'custom', title: 'Updates Fixed by Severity (verified by rescan)' },
+    { id: 'hostGauge', x: 0, y: 11, w: 5, h: 6, title: 'Selected host {host}: success rate' },
+    { id: 'hostTime', x: 5, y: 11, w: 9, h: 6, title: 'Selected host {host}: deployment time per run (s)', scale: true },
+    { id: 'hostHistory', x: 14, y: 11, w: 10, h: 6, title: 'Selected host {host}: run history', table: true },
+    { id: 'barHost', x: 0, y: 17, w: 8, h: 7, title: 'Patch Deployment Time per Host (Experiment 1, longest run in range, s)', scale: true },
+    { id: 'timeAll', x: 8, y: 17, w: 16, h: 7, title: 'Deployment Time per Run (each point is one host in one patch run, s)', scale: true },
+    { id: 'pie', x: 0, y: 24, w: 6, h: 7, title: 'Host Outcomes (patch runs)' },
+    { id: 'exp3', x: 6, y: 24, w: 9, h: 7, title: 'Scalability Across Multiple Hosts (Experiment 3, RHEL full-scope runs, x = hosts in run)' },
+    { id: 'orch', x: 15, y: 24, w: 9, h: 7, title: 'Orchestration Layer (Step Functions, Lambda, SNS)' },
+    { id: 'perDay', x: 0, y: 31, w: 12, h: 6, title: 'Step Functions Executions per Day' },
+    { id: 'platform', x: 12, y: 31, w: 12, h: 6, title: 'Success Rate by Platform (from CloudWatch Logs)', table: true },
+    { id: 'costSv', x: 0, y: 37, w: 6, h: 6, title: 'Estimated Operational Cost (Experiment 4, USD)' },
+    { id: 'costTable', x: 6, y: 37, w: 18, h: 6, title: 'Cost per Cycle (list price before free tier)', table: true },
+    { id: 'latest', x: 0, y: 43, w: 24, h: 7, title: 'Latest Host Results (scan and patch runs)', table: true },
+    { id: 'footer', x: 0, y: 50, w: 24, h: 2, type: 'text', plain: true },
   ];
 
   var state = {
@@ -296,16 +295,6 @@
   }
 
   var W = {};
-  W.header = function (body) {
-    var md = el('div', 'cw-md');
-    md.appendChild(el('h2', null, 'Centralized Agentless Patch Management'));
-    var p1 = el('p'); var b = el('strong', null, 'EventBridge Scheduler → Step Functions → Lambda → SSH (RHEL 9) / WinRM (Windows Server 2022)');
-    p1.appendChild(b); p1.appendChild(document.createTextNode(' · no agent on any host · region ' + (state.data.region || 'ap-southeast-5')));
-    var p2 = el('p'); p2.appendChild(document.createTextNode('The '));
-    p2.appendChild(el('strong', null, 'Host')); p2.appendChild(document.createTextNode(' selector changes the '));
-    p2.appendChild(el('em', null, 'Selected host')); p2.appendChild(document.createTextNode(' row · Colours: green from 90%, amber 80-90%, red below 80%'));
-    md.appendChild(p1); md.appendChild(p2); body.appendChild(md);
-  };
   W.footer = function (body) {
     var md = el('div', 'cw-md');
     var p = el('p'); p.appendChild(el('strong', null, 'Control plane only.'));

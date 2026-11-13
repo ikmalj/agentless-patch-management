@@ -209,7 +209,8 @@ filter record = 'cycle' and mode = 'patch' and hosts_total > 0
 ## Project Website
 
 `site/` is a static website that introduces the project and mirrors the CloudWatch dashboard
-`PatchManagement-Dashboard`: the same 18 widgets on the same 24-column layout, the same titles,
+`PatchManagement-Dashboard`: the same widgets on the same 24-column layout (the text header is left out,
+as the page title and the dashboard toolbar already carry it), the same titles,
 colours and **Host** selector (`?host=`), in the CloudWatch console style (light and dark). The three
 coloured Patch Summary panels are the HTML of `lambda/summary_widget.py` itself; every other widget is
 redrawn from the same records and metrics, following its Logs Insights query or metric expression in
@@ -226,6 +227,7 @@ redrawn from the same records and metrics, following its Logs Insights query or 
 | `site/assets/style.css`, `site/assets/dashboard.css`, `site/assets/app.js` | Page styling, CloudWatch-style dashboard styling, dashboard rendering (no libraries) |
 | `site/assets/theme.js` | Auto / Light / Dark switch |
 | `site/assets/og.png`, `favicon.svg`, `apple-touch-icon.png` | Link preview picture (1200x630) and icons; the picture is rendered from `site-src/og-card.html` (not published) |
+| `site-src/build_arch_diagram.py` | Writes the architecture diagram (inline SVG) into `site/index.html`; edit and re-run to change it |
 | `site/data/patch-data.js` | Fallback evaluation data from `evidence\` (same evidence always gives the same file) |
 | `site/build_site_data.py` | Builds that fallback: evidence reports -> metrics records (`lambda/metrics.py`) -> the publisher's format |
 | `lambda/site_publisher.py` | Lambda `serverless-patch-site-publisher`: writes `data/live.json` and `data/evaluation.json` |
