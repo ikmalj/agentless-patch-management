@@ -1,0 +1,25 @@
+{
+  "deployed_at": "2026-11-13T21:16:08",
+  "url": "https://fyp.ikmaljohari.my/",
+  "cloudfront_url": "https://dnk953cz59lco.cloudfront.net/",
+  "custom_domain": "fyp.ikmaljohari.my",
+  "certificate": "arn:aws:acm:us-east-1:588589592508:certificate/3f815c63-b299-4e44-9c79-bfff993e6340 (ISSUED)",
+  "distribution_id": "EVOGSACO8D6SJ",
+  "bucket": "serverless-patch-site-588589592508",
+  "region": "ap-southeast-5",
+  "oac_id": "ERUAYBEJPTCN3",
+  "live_publisher": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-site-publisher",
+  "live_rule": "serverless-patch-site-publish",
+  "live_days": 30,
+  "files": [
+    "index.html",
+    "assets/app.js",
+    "assets/apple-touch-icon.png",
+    "assets/dashboard.css",
+    "assets/favicon.svg",
+    "assets/og.png",
+    "assets/style.css",
+    "assets/theme.js",
+    "data/patch-data.js"
+  ]
+}

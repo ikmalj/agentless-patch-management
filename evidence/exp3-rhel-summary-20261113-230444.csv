@@ -1,0 +1,4 @@
+"Hosts","Status","Patched","Failed","CycleS","AvgHostS","MaxHostS","MinHostS","Before","Execution"
+"1","SUCCEEDED","1","0","338.1","337.9","337.9","337.9","425","exp3-rhel-n1-20261113-230650"
+"2","SUCCEEDED","2","0","361.8","330.3","361.6","299","425","exp3-rhel-n2-20261113-231502"
+"4","SUCCEEDED","4","0","295.9","284.2","295.7","257.8","425","exp3-rhel-n4-20261113-232343"

@@ -1,5 +1,5 @@
 {
-  "deployed_at": "2026-11-04T22:28:39",
+  "deployed_at": "2026-11-08T10:53:04",
   "sns_topic": "arn:aws:sns:ap-southeast-5:588589592508:serverless-patch-notify",
   "email": "ikmalj.tech@gmail.com",
   "email_status": "confirmed",

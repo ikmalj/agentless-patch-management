@@ -1,0 +1,21 @@
+{
+  "execution": "arn:aws:states:ap-southeast-5:588589592508:execution:serverless-patch-cycle:manual-scan-20261113-221845",
+  "status": "SUCCEEDED",
+  "error": null,
+  "report": {
+    "run_id": "manual-scan-20261113-221845",
+    "mode": "scan",
+    "percent": 100,
+    "started": "2026-11-13T14:18:50.686Z",
+    "finished": "2026-11-13T14:18:50.834Z",
+    "duration_s": 0.1,
+    "hosts_total": 0,
+    "patched": 0,
+    "patched_partial": 0,
+    "compliant": 0,
+    "scanned": 0,
+    "skipped": 0,
+    "failed": 0,
+    "results": []
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "launched_at": "2026-11-13T22:55:20",
+  "platform": "rhel",
+  "ami": "ami-0bf7b60a5f0dc4edc",
+  "instances": [
+    "i-0639036a392f0270b",
+    "i-06b6a700b6c2616e9"
+  ],
+  "names": [
+    "serverless-patch-rhel-03",
+    "serverless-patch-rhel-04"
+  ]
+}
