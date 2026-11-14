@@ -29,7 +29,7 @@ LOG_GROUP = os.environ.get("LOG_GROUP", "/aws/lambda/serverless-patch-metrics")
 BUCKET = os.environ.get("BUCKET", "")
 DISTRIBUTION_ID = os.environ.get("DISTRIBUTION_ID", "")
 STATE_MACHINE_ARN = os.environ.get("STATE_MACHINE_ARN", "")
-LIVE_DAYS = int(os.environ.get("LIVE_DAYS", "30"))
+LIVE_DAYS = int(os.environ.get("LIVE_DAYS", "14"))
 EVAL_FROM = os.environ.get("EVAL_FROM", "")     # YYYY-MM-DD, Malaysia time
 EVAL_TO = os.environ.get("EVAL_TO", "")         # YYYY-MM-DD, inclusive
 FUNCTIONS = [f for f in (os.environ.get("RHEL_FN", "serverless-patch-rhel"),
@@ -114,6 +114,14 @@ def build_payload(records, view, start, end, label, metrics=None, status=None, s
         "metrics": metrics,
         "cost_known": cost_known,
     }
+
+
+def live_label(days):
+    """Name of the Live view's period: "Last 2 weeks" for whole weeks, else "Last 10 days"."""
+    if days % 7 == 0:
+        weeks = days // 7
+        return "Last week" if weeks == 1 else f"Last {weeks} weeks"
+    return "Last day" if days == 1 else f"Last {days} days"
 
 
 def eval_window(now, date_from=None, date_to=None):
@@ -261,7 +269,7 @@ def lambda_handler(event, context=None, logs=None, sfn=None, s3=None, cloudfront
             now = datetime.now(timezone.utc)
             records = fetch_records(start, now, logs)
 
-    live = build_payload(records, "live", start, now, f"Last {LIVE_DAYS} days",
+    live = build_payload(records, "live", start, now, live_label(LIVE_DAYS),
                          metrics=fetch_metrics(start, now, cw, now), status=running_status(sfn), now=now)
     written = {"data/live.json": put_json(s3, "data/live.json", live)}
 

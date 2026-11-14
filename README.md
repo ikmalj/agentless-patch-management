@@ -218,7 +218,7 @@ redrawn from the same records and metrics, following its Logs Insights query or 
 
 | View | Data | Updates |
 |---|---|---|
-| **Live** (default) | `data/live.json`: last `$SiteLiveDays` days from CloudWatch | By itself: rewritten when a cycle starts or finishes; open pages re-check every 60 s and show "Patch cycle in progress" while one runs |
+| **Live** (default) | `data/live.json`: last `$SiteLiveDays` days from CloudWatch (14, shown as "Last 2 weeks") | By itself: rewritten when a cycle starts or finishes; open pages re-check every 60 s and show "Patch cycle in progress" while one runs |
 | **Evaluation** (`?view=evaluation`) | `data/evaluation.json`: `$SiteFrom`..`$SiteTo` from CloudWatch; falls back to `data/patch-data.js` (built from `evidence\`, no cost or orchestration counts) | When the publisher runs |
 
 | File | Purpose |

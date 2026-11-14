@@ -35,7 +35,7 @@ $SiteFrom         = '2026-11-01'           # results shown on the site: first da
 $SiteTo           = '2026-11-13'           # last day, inclusive; '' = up to the latest run
 $SitePublisherFn  = 'serverless-patch-site-publisher'   # Live view: rewrites data/live.json after each cycle
 $SitePublisherRole = 'serverless-patch-site-publisher-role'
-$SiteLiveDays     = 30                     # days of results in the Live view
+$SiteLiveDays     = 14                     # days of results in the Live view (14 = last 2 weeks)
 
 # Host name -> instance ID / private IP / baseline AMI (testbed build record)
 $Hosts = [ordered]@{
