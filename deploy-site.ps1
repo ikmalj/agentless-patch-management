@@ -10,9 +10,9 @@
     6. Custom domain (optional): ACM certificate in us-east-1, then the domain on the distribution
     7. Upload site\ and clear the CloudFront cache
     8. Live updates: Lambda serverless-patch-site-publisher + EventBridge rule on every status change
-       of the state machine; it rewrites data/live.json (last $SiteLiveDays days, plus data/evaluation.json
-       only if $SiteFrom/$SiteTo are set) from the same CloudWatch data as PatchManagement-Dashboard.
-       First publish now.
+       of the state machine; it rewrites data/live.json (last $SiteLiveDays days) and data/evaluation.json
+       (the All runs view: since $SiteFrom, no end date unless $SiteTo is set) from the same CloudWatch
+       data as PatchManagement-Dashboard. First publish now.
   Safe to run again: every step reuses what already exists. After this, the Live view updates by
   itself; run the script again only to change the page, the period or the domain.
   Does not touch any host, the patch Lambdas, the state machine or the CloudWatch dashboard.
@@ -262,8 +262,8 @@ $keys = foreach ($f in $local) {
     $key
 }
 # Remove objects that are no longer in site\. The publisher Lambda's files are not in site\: keep them.
-# data/evaluation.json is kept only while a fixed period is set; otherwise an old copy is removed.
-$publisherFiles = @('data/live.json') + $(if ($From -or $To) { @('data/evaluation.json') } else { @() })
+# data/evaluation.json (All runs) is kept only while $SiteFrom is set; otherwise an old copy is removed.
+$publisherFiles = @('data/live.json') + $(if ($From) { @('data/evaluation.json') } else { @() })
 $remote = @((Invoke-Aws s3api list-objects-v2 --bucket $SiteBucket).Contents | ForEach-Object Key)
 foreach ($old in ($remote | Where-Object { $_ -and $_ -notin $keys -and $_ -notin $publisherFiles })) {
     Invoke-Aws s3 rm "s3://$SiteBucket/$old" --only-show-errors | Out-Null

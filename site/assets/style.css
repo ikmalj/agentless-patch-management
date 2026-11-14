@@ -12,6 +12,7 @@
 /* Hallmark · dropped the arrow in "Open the dashboard ↓" · 63 names arrows glued to link text */
 /* Hallmark · dropped the 1 to 12 Nov figures · the evaluation now runs 1 to 13 Nov 2026 with the Experiment 3 runs, as the owner asked */
 /* Hallmark · answered F20 · legend rows hold one entry per host from the data, so the count changes with the hosts in range */
+/* Hallmark · dismissed 41 · the flagged rule paints the Live dot, a shape with no text in it; the button text sets --cw-on-accent */
 /* Hallmark · finish-review: subagent · 5 findings · 2 resolved (limit label, empty widgets) · 3 kept for the owner (host panel height, hero dot grid, AWS service squares) */
 /* Layout: one centred column of full-width bands; hero carries the pipeline, then the dashboard
    (assets/dashboard.css, styled after the CloudWatch console), then how it works.
@@ -106,7 +107,7 @@ a:active { opacity: .75; }
 .theme { display: inline-flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 2px; gap: 2px; }
 .theme button { position: relative; font: inherit; font-size: .75rem; font-weight: 600; color: var(--muted); background: none; border: 0; border-radius: 999px; min-height: 2rem; padding: .2rem .75rem; cursor: pointer; }
 /* 44px hit target around the compact app controls */
-.theme button::after { content: ""; position: absolute; inset: -6px 0; }
+.theme button::after, .views button::after { content: ""; position: absolute; inset: -6px 0; }
 .theme button:hover { color: var(--ink); }
 .theme button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
 
@@ -143,6 +144,13 @@ a:active { opacity: .75; }
 }
 
 .hero-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem 1rem; margin-top: .6rem; }
+.views { display: inline-flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 3px; gap: 2px; }
+.views button { position: relative; font: inherit; font-size: var(--step--1); font-weight: 600; color: var(--muted); background: none; border: 0; border-radius: 999px; min-height: 2rem; padding: .35rem .85rem; cursor: pointer; display: inline-flex; align-items: center; gap: .45rem; white-space: nowrap; }
+.views button:hover { color: var(--ink); }
+.views button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+.views button:disabled { opacity: .5; cursor: not-allowed; }
+.live-dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--ok); }
+.views button[aria-pressed="false"] .live-dot { background: var(--muted); }
 .status-line { display: inline-flex; align-items: center; gap: .6rem; align-self: flex-start; font-size: var(--step--1); font-variant-numeric: tabular-nums; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 1rem; padding: .4rem .9rem; }
 .status-line .dot { width: .55rem; height: .55rem; border-radius: 50%; background: var(--muted); flex: none; }
 .status-line.is-ok .dot { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }

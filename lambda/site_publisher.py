@@ -4,8 +4,8 @@ The website mirrors the CloudWatch dashboard PatchManagement-Dashboard. This Lam
 same data the dashboard reads and writes it as JSON the website draws:
 
   data/live.json        last LIVE_DAYS days, plus "patch cycle in progress" status
-  data/evaluation.json  a fixed period EVAL_FROM..EVAL_TO (Malaysia time), only if set; the website
-                        no longer has a view for it (it shows the last LIVE_DAYS days only)
+  data/evaluation.json  the website's "All runs" view: every run since EVAL_FROM (Malaysia time),
+                        up to now, or up to EVAL_TO if a last day is set; written only if EVAL_FROM is set
 
 Each file holds:
   records   serverless-patch-metrics host and cycle records (scan and patch), newest first, with
@@ -126,11 +126,17 @@ def live_label(days):
 
 
 def eval_window(now, date_from=None, date_to=None):
-    """(start, end, label) for a reporting period of whole days in Malaysia time, or None."""
+    """(start, end, label) for the "All runs" period, whole days in Malaysia time, or None.
+
+    A first day with no last day is open-ended: it runs up to now and is labelled "Since 1 Nov 2026",
+    so nothing needs changing as more cycles run. With both days it is a fixed period.
+    """
     date_from, date_to = date_from or EVAL_FROM, date_to or EVAL_TO
-    if not (date_from and date_to):
+    if not date_from:
         return None
     start = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=MYT)
+    if not date_to:
+        return start, now, f"Since {start.day} {start.strftime('%b %Y')}"
     last = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=MYT)
     end = min(last + timedelta(days=1), now)
     label = (f"{start.day} to {last.day} {last.strftime('%b %Y')}" if (start.year, start.month) == (last.year, last.month)

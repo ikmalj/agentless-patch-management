@@ -214,13 +214,13 @@ as the page title and the dashboard toolbar already carry it), the same titles,
 colours and **Host** selector (`?host=`), in the CloudWatch console style (light and dark). The three
 coloured Patch Summary panels are the HTML of `lambda/summary_widget.py` itself; every other widget is
 redrawn from the same records and metrics, following its Logs Insights query or metric expression in
-`dashboard/dashboard-v3.json`. Times are shown in MYT. The page shows one rolling period, so it never
-needs a date changed:
+`dashboard/dashboard-v3.json`. Times are shown in MYT. Two views, switched at the top of the dashboard;
+neither has an end date, so nothing needs changing as more cycles run:
 
-| Data | Source | Updates |
+| View | Data | Updates |
 |---|---|---|
-| **Last 2 weeks** | `data/live.json`: last `$SiteLiveDays` days (14) from CloudWatch | By itself: rewritten when a cycle starts or finishes; open pages re-check every 60 s and show "Patch cycle in progress" while one runs |
-| **Evidence files** (fallback) | `data/patch-data.js`, built from `evidence\` (no cost or orchestration counts) | Shown when the page is opened from disk, or before `data/live.json` is published |
+| **Live** (default) | `data/live.json`: last `$SiteLiveDays` days (14, "Last 2 weeks") from CloudWatch | By itself: rewritten when a cycle starts or finishes; open pages re-check every 60 s and show "Patch cycle in progress" while one runs |
+| **All runs** (`?view=all`) | `data/evaluation.json`: every run since `$SiteFrom` ("Since 1 Nov 2026") from CloudWatch; falls back to `data/patch-data.js` (built from `evidence\`, no cost or orchestration counts) | When the publisher runs |
 
 | File | Purpose |
 |---|---|
@@ -231,9 +231,9 @@ needs a date changed:
 | `site-src/build_arch_diagram.py` | Writes the architecture diagram (inline SVG) into `site/index.html`; edit and re-run to change it |
 | `site/data/patch-data.js` | Fallback data from `evidence\` (same evidence always gives the same file) |
 | `site/build_site_data.py` | Builds that fallback: evidence reports (`cycle-*.json` and the Experiment 3 runs `exp3-*-n*.json`) -> metrics records (`lambda/metrics.py`) -> the publisher's format |
-| `lambda/site_publisher.py` | Lambda `serverless-patch-site-publisher`: writes `data/live.json` (and `data/evaluation.json` only if a fixed period is set) |
+| `lambda/site_publisher.py` | Lambda `serverless-patch-site-publisher`: writes `data/live.json` and `data/evaluation.json` |
 
-To look at the page locally (opened from disk it shows the evidence files; the last 2 weeks need the published site):
+To look at the page locally (opened from disk, All runs shows the evidence files; Live needs the published site):
 
 ```powershell
 python site\build_site_data.py
@@ -261,10 +261,10 @@ the other deploy scripts (safe to run again):
 | CloudFront distribution (comment `serverless-patch project website`) | HTTPS only, AWS managed caching and security-headers policies, `index.html` as root |
 | Bucket policy | `s3:GetObject` for this distribution's ARN only |
 
-`$SiteFrom` and `$SiteTo` in `config.ps1` are left empty, so the site has no fixed dates and the evidence
-fallback covers every cycle in `evidence\`. Setting them (or `.\deploy-site.ps1 -From 2026-11-01 -To 2026-11-13`)
-limits the fallback to those days and makes the publisher also write `data/evaluation.json` for that period,
-which the page does not show.
+The All runs view starts on `$SiteFrom` in `config.ps1` (1 Nov 2026, the start of the evaluation; Malaysia
+time) and has no end date, because `$SiteTo` is empty. Set `$SiteTo` (or run
+`.\deploy-site.ps1 -From 2026-11-01 -To 2026-11-13`) only to freeze it to a fixed period. The evidence
+fallback covers the same days.
 
 The URL (`https://<id>.cloudfront.net/`) is printed at the end and saved to `evidence\deploy-site.json`.
 The first deployment takes 5 to 15 minutes to reach the edge locations. Files are uploaded with an
@@ -283,7 +283,7 @@ serverless-patch-cycle starts / finishes
         renders the Patch Summary panels with summary_widget.py (light and dark)
         reads Step Functions / Lambda / SNS counts (GetMetricData) for the Orchestration widgets
         asks Step Functions which executions are running
-        writes data/live.json (and data/evaluation.json if a fixed period is set), clears them in CloudFront
+        writes data/live.json and data/evaluation.json, clears both in CloudFront
    -> open pages re-check data/live.json every 60 s
 ```
 

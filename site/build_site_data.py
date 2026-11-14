@@ -11,9 +11,10 @@ Patch Summary panels are the same HTML as the CloudWatch custom widgets. Two thi
 CloudWatch and are left out here: cost per cycle and the Step Functions / Lambda / SNS counts.
 
     python site/build_site_data.py
-    python site/build_site_data.py --from 2026-11-01 --to 2026-11-13
+    python site/build_site_data.py --from 2026-11-01
 
---from / --to keep only cycles that started on those days, Malaysia time (UTC+8), both inclusive.
+--from / --to keep only cycles that started on those days, Malaysia time (UTC+8), both inclusive;
+without --to the period is open-ended, as on the published site.
 No account ID, ARNs, instance IDs or IP addresses are written, and the same evidence always gives
 the same file (no build time in it), so a deploy run does not leave the file modified in git.
 """
@@ -68,6 +69,8 @@ def main():
     to = args.date_to or starts[-1].astimezone(MYT).strftime("%Y-%m-%d")
     far_future = datetime(9999, 1, 1, tzinfo=timezone.utc)
     start, end, label = site_publisher.eval_window(far_future, frm, to)
+    if not args.date_to:        # open-ended, named like the publisher's All runs view ("Since 1 Nov 2026")
+        label = site_publisher.eval_window(far_future, frm, None)[2]
     if end <= start:
         sys.exit("--to is before --from")
 
