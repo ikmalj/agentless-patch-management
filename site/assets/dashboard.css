@@ -58,10 +58,6 @@
 .cw-var { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: var(--cw-text); }
 .cw-var select { font: inherit; font-weight: 400; font-size: 13px; color: var(--cw-text); background: var(--cw-control);
   border: 1px solid var(--cw-control-border); border-radius: 8px; padding: 4px 28px 4px 10px; max-width: 100%; }
-.cw-band .views { background: var(--cw-control); color: var(--cw-text); border-color: var(--cw-control-border); }
-.cw-band .views button { font-family: var(--cw-font); color: var(--cw-muted); }
-.cw-band .views button[aria-pressed="true"] { background: var(--cw-link); color: var(--cw-on-accent); box-shadow: none; }
-.cw-band .views button[aria-pressed="true"] .live-dot { background: var(--cw-on-accent); }
 .cw-band .status-line { background: var(--cw-panel); border-color: var(--cw-border); color: var(--cw-text); margin-bottom: 12px; font-family: var(--cw-font); }
 
 /* grid */

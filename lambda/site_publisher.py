@@ -4,7 +4,8 @@ The website mirrors the CloudWatch dashboard PatchManagement-Dashboard. This Lam
 same data the dashboard reads and writes it as JSON the website draws:
 
   data/live.json        last LIVE_DAYS days, plus "patch cycle in progress" status
-  data/evaluation.json  the fixed evaluation period EVAL_FROM..EVAL_TO (Malaysia time), if set
+  data/evaluation.json  a fixed period EVAL_FROM..EVAL_TO (Malaysia time), only if set; the website
+                        no longer has a view for it (it shows the last LIVE_DAYS days only)
 
 Each file holds:
   records   serverless-patch-metrics host and cycle records (scan and patch), newest first, with

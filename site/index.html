@@ -14,7 +14,7 @@
 <meta property="og:site_name" content="serverless-patch">
 <meta property="og:url" content="https://fyp.ikmaljohari.my/">
 <meta property="og:title" content="Centralized agentless patch management">
-<meta property="og:description" content="RHEL 9 and Windows Server 2022 patched by AWS Step Functions and Lambda with no agent on any host. Live CloudWatch dashboard: 99.9% of updates verified fixed in the 1 to 13 Nov 2026 evaluation.">
+<meta property="og:description" content="RHEL 9 and Windows Server 2022 patched by AWS Step Functions and Lambda with no agent on any host. Live CloudWatch dashboard of the last 2 weeks, updated after every patch cycle.">
 <meta property="og:image" content="https://fyp.ikmaljohari.my/assets/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -77,10 +77,6 @@
           <p id="cw-sub">Mirror of the CloudWatch dashboard, times in MYT (UTC+8). <strong>Host</strong> changes the <em>Selected host</em> row. Green from 90%, amber from 80% to 90%, red below 80%.</p>
         </div>
         <div class="cw-controls">
-          <div class="views" role="group" aria-label="Results to show">
-            <button type="button" id="view-live" aria-pressed="true"><span class="live-dot" aria-hidden="true"></span>Live</button>
-            <button type="button" id="view-evaluation" aria-pressed="false">Evaluation <span id="eval-range"></span></button>
-          </div>
           <span class="cw-range" id="cw-range" title="Time range">Loading…</span>
           <label class="cw-var" for="cw-host">Host <select id="cw-host"></select></label>
         </div>

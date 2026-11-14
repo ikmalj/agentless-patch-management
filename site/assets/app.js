@@ -1,10 +1,10 @@
 /* Mirror of the CloudWatch dashboard PatchManagement-Dashboard (dashboard/dashboard-v3.json).
 
    Data (same format from every source, see lambda/site_publisher.py):
-     Live        data/live.json        written by serverless-patch-site-publisher when a cycle starts
-                                       or ends; re-checked every 60 s while the page is open
-     Evaluation  data/evaluation.json  same, for the fixed evaluation period
-                 window.PATCH_DATA     fallback built from evidence/ (no cost, no orchestration counts)
+     data/live.json      the last 2 weeks, written by serverless-patch-site-publisher when a cycle
+                         starts or ends; re-checked every 60 s while the page is open
+     window.PATCH_DATA   fallback built from evidence/ (no cost, no orchestration counts), shown when
+                         the page is opened from disk or live.json is not published yet
 
    The three coloured panels are the HTML of summary_widget.py itself (shown in a shadow root).
    Every other widget is redrawn here from the same records, following its Logs Insights query or
@@ -45,7 +45,7 @@
 
   var state = {
     view: null, data: null, host: null,
-    live: null, liveText: '', evaluation: null,
+    live: null, liveText: '',
     redrawTimer: null,
   };
 
@@ -303,8 +303,7 @@
     p.appendChild(document.createTextNode(' Every value comes from Step Functions, Lambda, SNS and the serverless-patch-metrics log records. ' +
       'The coloured panels at the top are CloudWatch custom widgets drawn by the read-only Lambda serverless-patch-summary-widget. ' +
       'No monitoring agent is installed on any host. Success counts only updates confirmed fixed by the post-install rescan. ' +
-      'Cost is a list-price estimate from the execution history, before the free tier. Microsoft Defender updates are excluded from the Windows counts by design. ' +
-      'For the evaluation period, choose Evaluation at the top.'));
+      'Cost is a list-price estimate from the execution history, before the free tier. Microsoft Defender updates are excluded from the Windows counts by design.'));
     md.appendChild(p); body.appendChild(md);
   };
   function custom(name) {
@@ -599,28 +598,27 @@
     paint($('status-line'), $('status-text'), statusFor(state.data, state.view));
     var hero = state.live ? statusFor(state.live, 'live')
       : (state.data ? statusFor(state.data, state.view) : { cls: '', text: 'Checking the latest patch results…' });
-    if (!state.live && state.data && state.data.range) hero.text = hero.base + ', ' + state.data.range.label + '.';
     paint($('hero-status'), $('hero-status-text'), hero);
   }
   function show(d) {
     state.data = d;
-    $('cw-range').textContent = (d.range && d.range.label) || '';
+    $('cw-range').textContent = d.source === 'evidence' ? 'Evidence files' : ((d.range && d.range.label) || '');
     $('source-note').textContent = d.source === 'evidence'
       ? 'This view is built from the cycle results in the repository\'s evidence/ folder.'
       : 'Data from CloudWatch (serverless-patch-metrics records and Step Functions, Lambda and SNS metrics), published by the serverless-patch-site-publisher Lambda.';
     fillHosts(); drawStatus(); render();
   }
 
-  // ------------------------------------------------------------ views and loading
-  var btnLive = $('view-live'), btnEval = $('view-evaluation');
-  $('eval-range').textContent = FALLBACK && FALLBACK.range ? FALLBACK.range.label : '';
+  // ------------------------------------------------------------ loading
+  // One view: the last 2 weeks from data/live.json, re-checked every POLL_MS. Opened from disk, or
+  // before the publisher has run, the page shows the evidence fallback (data/patch-data.js) instead.
   var fromDisk = window.location.protocol === 'file:';
 
   function setUrl() {
     if (fromDisk) return;
     try {
       var url = new URL(window.location.href);
-      if (state.view === 'evaluation') url.searchParams.set('view', 'evaluation'); else url.searchParams.delete('view');
+      url.searchParams.delete('view');
       if (state.host) url.searchParams.set('host', state.host); else url.searchParams.delete('host');
       window.history.replaceState(null, '', url);
     } catch (e) { /* the view still works */ }
@@ -635,52 +633,39 @@
       return { d: d, text: text };
     });
   }
-  function hasPatch(d) { return cycleRecs(d).some(function (r) { return r.mode === 'patch'; }); }
-
-  function setView(view, quiet) {
-    state.view = view;
-    btnLive.setAttribute('aria-pressed', String(view === 'live'));
-    btnEval.setAttribute('aria-pressed', String(view === 'evaluation'));
-    if (!quiet) setUrl();
-    if (view === 'live') { if (state.live) show(state.live); return loadLive(); }
-    if (state.evaluation) { show(state.evaluation); return; }
-    if (FALLBACK) show(FALLBACK);
-    if (fromDisk) return;
-    getJson('data/evaluation.json').then(function (x) {
-      if (!hasPatch(x.d)) return;            // nothing in CloudWatch for the period: keep the evidence view
-      state.evaluation = x.d;
-      if (state.view === 'evaluation') show(x.d);
-    }).catch(function () { /* keep the evidence view */ });
+  function showEvidence(extra) {
+    state.view = 'evidence';
+    show(FALLBACK);
+    if (extra) $('status-text').textContent += ' ' + extra;
   }
   function loadLive() {
     return getJson('data/live.json').then(function (x) {
       var changed = x.text !== state.liveText;
       if (changed) { state.live = x.d; state.liveText = x.text; }
-      btnLive.title = '';
-      if (state.view !== 'live') return;
+      state.view = 'live';
       if (changed || state.data !== state.live) show(state.live); else drawStatus();
     }).catch(function () {
-      btnLive.title = 'Live results are not available right now';
-      if (state.view !== 'live') return;
       if (state.live) { drawStatus(); return; }
-      if (FALLBACK) { setView('evaluation', true); $('status-text').textContent += ' Live data is not published yet.'; }
+      if (FALLBACK) { if (state.data !== FALLBACK) showEvidence('Live data is not published yet.'); }
       else $('status-text').textContent = 'Live data is not available yet.';
     });
   }
-  btnLive.addEventListener('click', function () { if (state.view !== 'live') setView('live'); });
-  btnEval.addEventListener('click', function () { if (state.view !== 'evaluation') setView('evaluation'); });
-  if (!FALLBACK && fromDisk) btnEval.disabled = true;
 
-  setInterval(function () {
-    if (state.view !== 'live' || document.hidden) return;
-    if (state.data) drawStatus();
-    loadLive();
-  }, POLL_MS);
-  document.addEventListener('visibilitychange', function () { if (!document.hidden && state.view === 'live') loadLive(); });
-
-  var wanted = new URLSearchParams(window.location.search).get('view') === 'evaluation' ? 'evaluation' : 'live';
-  if (fromDisk) wanted = 'evaluation';
-  setView(wanted, true);
+  if (!fromDisk) {
+    setInterval(function () {
+      if (document.hidden) return;
+      if (state.data) drawStatus();
+      loadLive();
+    }, POLL_MS);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) loadLive(); });
+  }
+  // Drop the old Evaluation view's ?view= from shared links; ?host= is kept for fillHosts().
+  if (!fromDisk) try {
+    var u = new URL(window.location.href);
+    if (u.searchParams.has('view')) { u.searchParams.delete('view'); window.history.replaceState(null, '', u); }
+  } catch (e) { /* the page still works */ }
+  if (fromDisk) { if (FALLBACK) showEvidence(); else $('status-text').textContent = 'No results to show yet.'; }
+  else loadLive();
 
   // Redraw charts when the layout width or the theme changes.
   var lastW = grid.clientWidth;

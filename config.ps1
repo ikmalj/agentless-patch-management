@@ -31,8 +31,8 @@ $SiteBucket       = "serverless-patch-site-$Account"
 $SiteOacName      = 'serverless-patch-site-oac'
 $SiteComment      = 'serverless-patch project website'
 $SiteDomain       = 'fyp.ikmaljohari.my'   # custom domain (DNS at Cloudflare); '' for the cloudfront.net address only
-$SiteFrom         = '2026-11-01'           # results shown on the site: first day, YYYY-MM-DD (MYT); '' = from the first run
-$SiteTo           = '2026-11-13'           # last day, inclusive; '' = up to the latest run
+$SiteFrom         = ''                     # optional fixed period, first day YYYY-MM-DD (MYT); '' = none (the site shows only the last $SiteLiveDays days)
+$SiteTo           = ''                     # last day, inclusive; '' = none. The evidence fallback then covers every run
 $SitePublisherFn  = 'serverless-patch-site-publisher'   # Live view: rewrites data/live.json after each cycle
 $SitePublisherRole = 'serverless-patch-site-publisher-role'
 $SiteLiveDays     = 14                     # days of results in the Live view (14 = last 2 weeks)
