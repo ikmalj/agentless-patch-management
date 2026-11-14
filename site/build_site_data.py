@@ -5,13 +5,13 @@ writes from CloudWatch (the same data as the PatchManagement-Dashboard). This sc
 site/data/patch-data.js from the cycle results in evidence/ instead, in the same format, so the page
 also works opened from disk and has something to show before the publisher has run.
 
-It turns every evidence/cycle-*.json report into the records the serverless-patch-metrics Lambda
+It turns every evidence/cycle-*.json report (and the Experiment 3 runs, evidence/exp3-*-n*.json) into the records the serverless-patch-metrics Lambda
 logs (lambda/metrics.py), then uses the publisher's own builder (lambda/site_publisher.py), so the
 Patch Summary panels are the same HTML as the CloudWatch custom widgets. Two things exist only in
 CloudWatch and are left out here: cost per cycle and the Step Functions / Lambda / SNS counts.
 
     python site/build_site_data.py
-    python site/build_site_data.py --from 2026-11-01 --to 2026-11-12
+    python site/build_site_data.py --from 2026-11-01 --to 2026-11-13
 
 --from / --to keep only cycles that started on those days, Malaysia time (UTC+8), both inclusive.
 No account ID, ARNs, instance IDs or IP addresses are written, and the same evidence always gives
@@ -54,13 +54,14 @@ def main():
     args = ap.parse_args()
 
     reports = []
-    for path in sorted(glob.glob(os.path.join(EVIDENCE, "cycle-*.json"))):
+    paths = glob.glob(os.path.join(EVIDENCE, "cycle-*.json")) + glob.glob(os.path.join(EVIDENCE, "exp3-*-n*.json"))
+    for path in sorted(paths):
         with open(path, encoding="utf-8-sig") as f:
             report = (json.load(f) or {}).get("report") or {}
         if report.get("mode") in ("scan", "patch") and report.get("started") and report.get("results") is not None:
             reports.append(report)
     if not reports:
-        sys.exit(f"no cycle-*.json reports in {EVIDENCE}")
+        sys.exit(f"no cycle-*.json or exp3-*-n*.json reports in {EVIDENCE}")
 
     starts = sorted(parse_time(r["started"]) for r in reports)
     frm = args.date_from or starts[0].astimezone(MYT).strftime("%Y-%m-%d")

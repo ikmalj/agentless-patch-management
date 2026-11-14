@@ -9,8 +9,9 @@ P = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 's
 
 out = []
 def box(x, y, w, h, title, sub, accent, mono=True):
-    out.append(f'<g class="ab"><rect x="{x}" y="{y}" width="{w}" height="{h}" rx="8"/>'
-               f'<rect class="ab-accent" x="{x}" y="{y}" width="5" height="{h}" rx="2" style="fill:{accent}"/>'
+    # accent: a colour class from style.css (.c-trigger, .c-fn, ...), drawn as a square in the top right corner
+    out.append(f'<g class="ab c-{accent}"><rect x="{x}" y="{y}" width="{w}" height="{h}" rx="8"/>'
+               f'<rect class="ab-accent" x="{x + w - 15}" y="{y + 7}" width="7" height="7" rx="1.5"/>'
                f'<text class="{"ab-t mono" if mono else "ab-t"}" x="{x + 16}" y="{y + 23}">{html.escape(title)}</text>')
     for i, line in enumerate(sub):
         out.append(f'<text class="ab-s" x="{x + 16}" y="{y + 41 + i * 15}">{html.escape(line)}</text>')
@@ -24,38 +25,38 @@ def edge(points, label=None, at=None, dashed=False, anchor='middle'):
         out.append(f'<text class="ae-l" x="{lx}" y="{ly}" text-anchor="{anchor}">{html.escape(label)}</text>')
 
 # ---- band 1: patching ----
-out.append('<text class="ab-band" x="20" y="22">1 · PATCHING</text>')
+out.append('<text class="ab-band" x="20" y="22">Patching</text>')
 out.append('<rect class="vpc" x="440" y="34" width="660" height="262" rx="12"/>')
-out.append('<text class="vpc-l" x="456" y="54">VPC · private subnet · ap-southeast-5</text>')
-box(20, 128, 180, 64, 'EventBridge Scheduler', ['weekly or one-time trigger'], '#7c3aed')
-box(232, 114, 180, 92, 'Step Functions', ['serverless-patch-cycle', 'parallel branch per host', 'precheck → patch → rescan'], '#e7157b')
-box(470, 70, 228, 58, 'λ serverless-patch-rhel', ['SSH client'], '#ff9900')
-box(470, 152, 228, 52, 'Secrets Manager', ['VPC endpoint · SSH key, WinRM'], '#dd344c')
-box(470, 228, 228, 58, 'λ serverless-patch-windows', ['WinRM client'], '#ff9900')
-box(912, 62, 178, 56, 'rhel-01', ['RHEL 9 · nginx · no agent'], 'var(--rhel)')
-box(912, 136, 178, 56, 'rhel-02', ['RHEL 9 · MySQL · no agent'], 'var(--rhel)')
-box(912, 222, 178, 70, 'win-01', ['Windows Server 2022', 'IIS · no agent'], 'var(--win)')
-edge([(200, 160), (228, 160)])
+out.append('<text class="vpc-l" x="456" y="54">VPC, private subnet, ap-southeast-5</text>')
+box(14, 128, 190, 64, 'EventBridge Scheduler', ['weekly or one-time trigger'], 'trigger')
+box(232, 114, 180, 92, 'Step Functions', ['serverless-patch-cycle', 'parallel branch per host', 'precheck, patch, rescan'], 'orch')
+box(470, 70, 228, 58, 'λ serverless-patch-rhel', ['SSH client'], 'fn')
+box(470, 152, 228, 52, 'Secrets Manager', ['VPC endpoint: SSH key, WinRM'], 'secrets')
+box(470, 228, 228, 58, 'λ serverless-patch-windows', ['WinRM client'], 'fn')
+box(912, 62, 178, 56, 'rhel-01', ['RHEL 9, nginx, no agent'], 'rhel')
+box(912, 136, 178, 56, 'rhel-02', ['RHEL 9, MySQL, no agent'], 'rhel')
+box(912, 222, 178, 70, 'win-01', ['Windows Server 2022', 'IIS, no agent'], 'win')
+edge([(204, 160), (228, 160)])
 edge([(412, 140), (440, 140), (440, 99), (466, 99)])
 edge([(412, 180), (440, 180), (440, 257), (466, 257)])
 edge([(584, 152), (584, 132)], dashed=True)
 edge([(584, 204), (584, 224)], dashed=True)
-edge([(698, 90), (908, 90)], 'SSH 22 · dnf upgrade --security', (803, 82))
+edge([(698, 90), (908, 90)], 'SSH 22: dnf upgrade --security', (803, 82))
 edge([(698, 108), (803, 108), (803, 164), (908, 164)])
-edge([(698, 257), (908, 257)], 'WinRM 5986 · Windows Update API', (803, 249))
+edge([(698, 257), (908, 257)], 'WinRM 5986: Windows Update API', (803, 249))
 
 # ---- band 2: monitoring and website ----
-out.append('<text class="ab-band" x="20" y="336">2 · MONITORING AND WEBSITE</text>')
-box(20, 380, 170, 58, 'Amazon SNS', ['result email per cycle'], '#2563eb')
-box(232, 380, 176, 58, 'λ …-metrics', ['host + cycle records'], '#ff9900')
-box(452, 370, 196, 78, 'CloudWatch', ['Logs · Metrics (EMF)', 'PatchManagement-Dashboard', '(18 widgets)'], '#2563eb')
-box(690, 380, 170, 58, 'λ …-site-publisher', ['dashboard data'], '#ff9900')
-box(910, 380, 190, 58, 'EventBridge rule', ['cycle started / finished'], '#7c3aed')
-box(20, 510, 170, 58, 'GitHub', ['code · pull requests'], 'var(--ink)')
-box(232, 510, 176, 58, 'deploy-site.ps1', ['PowerShell + AWS CLI'], 'var(--muted)')
-box(690, 510, 180, 58, 'S3 (private)', ['site files · data/*.json'], '#3f8624')
-box(910, 510, 190, 58, 'CloudFront + ACM', ['HTTPS · cache · OAC'], '#8c4fff')
-box(910, 612, 190, 52, 'fyp.ikmaljohari.my', ['Cloudflare DNS → visitors'], 'var(--accent)')
+out.append('<text class="ab-band" x="20" y="336">Monitoring and website</text>')
+box(20, 380, 170, 58, 'Amazon SNS', ['result email per cycle'], 'obs')
+box(232, 380, 176, 58, 'λ …-metrics', ['host + cycle records'], 'fn')
+box(452, 370, 196, 78, 'CloudWatch', ['Logs and Metrics (EMF)', 'PatchManagement-Dashboard', '(18 widgets)'], 'obs')
+box(690, 380, 170, 58, 'λ …-site-publisher', ['dashboard data'], 'fn')
+box(910, 380, 190, 58, 'EventBridge rule', ['cycle started / finished'], 'trigger')
+box(20, 510, 170, 58, 'GitHub', ['code and pull requests'], 'ink')
+box(232, 510, 176, 58, 'deploy-site.ps1', ['PowerShell + AWS CLI'], 'muted')
+box(690, 510, 180, 58, 'S3 (private)', ['site files, data/*.json'], 's3')
+box(910, 510, 190, 58, 'CloudFront + ACM', ['HTTPS, cache, OAC'], 'cdn')
+box(910, 612, 190, 52, 'fyp.ikmaljohari.my', ['Cloudflare DNS to visitors'], 'accent')
 edge([(262, 206), (262, 356), (105, 356), (105, 376)], 'publish', (180, 350))
 edge([(320, 206), (320, 376)])
 edge([(392, 206), (392, 318), (1005, 318), (1005, 376)], 'execution status events', (700, 312))

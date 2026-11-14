@@ -4,3 +4,6 @@ build/
 *.ppk
 .aws/
 grafana/
+
+# Hallmark design-check records and screenshots
+.hallmark/

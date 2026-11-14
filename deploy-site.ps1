@@ -39,7 +39,7 @@
   .\deploy-site.ps1
   .\deploy-site.ps1 -SkipBuild
   .\deploy-site.ps1 -Domain patch.example.com
-  .\deploy-site.ps1 -From 2026-11-01 -To 2026-11-12
+  .\deploy-site.ps1 -From 2026-11-01 -To 2026-11-13
 #>
 param([switch]$SkipBuild, [string]$Domain, [string]$From, [string]$To)
 $ErrorActionPreference = 'Stop'
@@ -251,7 +251,8 @@ $types = @{
     '.svg'  = 'image/svg+xml'; '.png' = 'image/png'; '.jpg' = 'image/jpeg'; '.ico' = 'image/x-icon'; '.webp' = 'image/webp'
 }
 $local = @(Get-ChildItem $SiteDir -Recurse -File | Where-Object {
-    $_.Extension -ne '.py' -and $_.FullName -notmatch '[\\/]__pycache__[\\/]' -and -not $_.Name.StartsWith('.') })
+    $rel = $_.FullName.Substring($SiteDir.Length)
+    $_.Extension -ne '.py' -and $rel -notmatch '[\\/]__pycache__[\\/]' -and $rel -notmatch '[\\/]\.' })   # no dot files or dot folders (.hallmark)
 $keys = foreach ($f in $local) {
     $key = [System.IO.Path]::GetRelativePath($SiteDir, $f.FullName).Replace('\', '/')
     $type = $types[$f.Extension.ToLowerInvariant()]

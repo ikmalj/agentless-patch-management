@@ -229,7 +229,7 @@ redrawn from the same records and metrics, following its Logs Insights query or 
 | `site/assets/og.png`, `favicon.svg`, `apple-touch-icon.png` | Link preview picture (1200x630) and icons; the picture is rendered from `site-src/og-card.html` (not published) |
 | `site-src/build_arch_diagram.py` | Writes the architecture diagram (inline SVG) into `site/index.html`; edit and re-run to change it |
 | `site/data/patch-data.js` | Fallback evaluation data from `evidence\` (same evidence always gives the same file) |
-| `site/build_site_data.py` | Builds that fallback: evidence reports -> metrics records (`lambda/metrics.py`) -> the publisher's format |
+| `site/build_site_data.py` | Builds that fallback: evidence reports (`cycle-*.json` and the Experiment 3 runs `exp3-*-n*.json`) -> metrics records (`lambda/metrics.py`) -> the publisher's format |
 | `lambda/site_publisher.py` | Lambda `serverless-patch-site-publisher`: writes `data/live.json` and `data/evaluation.json` |
 
 To look at the Evaluation view locally (opened from disk, the page shows Evaluation; Live needs the published site):
@@ -261,12 +261,14 @@ the other deploy scripts (safe to run again):
 | Bucket policy | `s3:GetObject` for this distribution's ARN only |
 
 The results shown can be limited to a date range (Malaysia time, both days inclusive) with `$SiteFrom` and
-`$SiteTo` in `config.ps1`, or `.\deploy-site.ps1 -From 2026-11-01 -To 2026-11-12`; the page then names that
-range as its reporting period. Leave both empty to show every patch cycle in `evidence\`.
+`$SiteTo` in `config.ps1`, or `.\deploy-site.ps1 -From 2026-11-01 -To 2026-11-13`; the page then names that
+range as its reporting period (the evaluation runs 1 to 13 Nov 2026, so it includes the Experiment 3 runs of 13 Nov).
+Leave both empty to show every patch cycle in `evidence\`.
 
 The URL (`https://<id>.cloudfront.net/`) is printed at the end and saved to `evidence\deploy-site.json`.
 The first deployment takes 5 to 15 minutes to reach the edge locations. Files are uploaded with an
-explicit Content-Type, `build_site_data.py` is not uploaded, and the cache is cleared on every run.
+explicit Content-Type, `build_site_data.py` and dot folders (such as `.hallmark/`) are not uploaded, and the cache is
+cleared on every run.
 
 #### Live updates
 

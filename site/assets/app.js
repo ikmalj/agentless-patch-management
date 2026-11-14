@@ -15,8 +15,9 @@
   var FALLBACK = window.PATCH_DATA && Array.isArray(window.PATCH_DATA.records) ? window.PATCH_DATA : null;
   var POLL_MS = 60000;
   var LIMIT_S = 900;
-  var PALETTE = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'];
-  var GREEN = '#2ca02c', RED = '#d62728', ORANGE = '#ff7f0e', GREY = '#7f7f7f';
+  // The CloudWatch chart palette and status colours come from the tokens in dashboard.css
+  // (--cw-c1 to --cw-c10, --cw-green and so on); readColours() fills them before each render.
+  var PALETTE = [], GREEN, RED, ORANGE, GREY;
   var PATCHED = { patched: 1, patched_partial: 1 };
   var SVG_NS = 'http://www.w3.org/2000/svg';
   var LIMIT_LABEL = 'Lambda 15-min limit (900 s): installs run on the host';
@@ -191,10 +192,11 @@
   function annotation(f, y, x0, x1, value, colour, text) {
     f.svg.appendChild(svg('line', { x1: x0, x2: x1, y1: y(value), y2: y(value), stroke: colour, 'stroke-width': 1.5 }));
     if (text) {
-      // A halo in the panel colour keeps the label readable where it crosses a bar or a line.
-      var t = svg('text', { x: x0 + 4, y: y(value) - 5, 'paint-order': 'stroke', 'stroke-width': 3, 'stroke-linejoin': 'round' },
+      // Under the line, clear of the 1,000 gridline just above it on the log scale; a halo in the
+      // panel colour keeps it readable where it crosses a bar or a line.
+      var t = svg('text', { x: x0 + 4, y: y(value) + 13, 'paint-order': 'stroke', 'stroke-width': 4, 'stroke-linejoin': 'round' },
         (x1 - x0) < 380 ? 'Lambda limit 900 s' : text);
-      t.style.fill = colour; t.style.stroke = css('--cw-panel'); f.svg.appendChild(t);
+      t.style.fill = css('--cw-red-text') || colour; t.style.stroke = css('--cw-panel'); f.svg.appendChild(t);
     }
   }
   function legendItem(f, colour, text, square) {
@@ -483,7 +485,13 @@
   // ------------------------------------------------------------ grid
   var grid = $('cw-grid');
   function title(spec) { return (spec.title || '').replace('{host}', state.host || '—'); }
+  function readColours() {
+    PALETTE = [];
+    for (var i = 1; i <= 10; i++) PALETTE.push(css('--cw-c' + i));
+    GREEN = css('--cw-green'); RED = css('--cw-red'); ORANGE = css('--cw-orange'); GREY = css('--cw-grey');
+  }
   function render() {
+    readColours();
     hideTip();
     grid.replaceChildren();
     if (!state.data) return;
@@ -512,21 +520,20 @@
     });
   }
 
-  // A table wider than its widget: fade the right edge and offer a "more columns" button, so the
-  // hidden columns are not mistaken for missing ones.
+  // A table wider than its widget: fade the right edge and put a "More columns" button in the
+  // widget's title row, so the hidden columns are not mistaken for missing ones.
   function moreHint(w, body) {
     var head = w.querySelector('.cw-wh');
     var fade = el('div', 'cw-fade'); fade.setAttribute('aria-hidden', 'true');
-    var more = el('button', 'cw-more', '›'); more.type = 'button';
-    more.setAttribute('aria-label', 'Show more columns'); more.title = 'More columns';
-    var headH = head ? head.offsetHeight : 0;
-    fade.style.top = headH + 'px';
-    more.style.top = Math.round(headH + body.clientHeight / 2 - 13) + 'px';
-    w.appendChild(fade); w.appendChild(more);
+    var more = el('button', 'cw-tool cw-more', 'More columns'); more.type = 'button';
+    more.title = 'Scroll the table sideways to show the rest of its columns';
+    fade.style.top = (head ? head.offsetHeight : 0) + 'px';
+    w.appendChild(fade);
+    (head || w).appendChild(more);
     function update() {
-      var hidden = body.scrollWidth - body.clientWidth - body.scrollLeft > 4;
-      fade.classList.toggle('on', hidden); more.classList.toggle('on', hidden);
-      more.tabIndex = hidden ? 0 : -1;
+      var wide = body.scrollWidth - body.clientWidth > 4;
+      var rest = body.scrollWidth - body.clientWidth - body.scrollLeft > 4;
+      more.hidden = !wide; more.disabled = !rest; fade.hidden = !rest;
     }
     more.addEventListener('click', function () { body.scrollBy({ left: Math.max(160, body.clientWidth * 0.6), behavior: 'smooth' }); });
     body.addEventListener('scroll', update, { passive: true });
@@ -568,8 +575,9 @@
     if (!d) return { cls: '', text: 'No results to show yet.' };
     var st = d.status || {};
     if (view === 'live' && st.state === 'running') {
-      return { cls: 'is-running', text: (st.mode === 'patch' ? 'Patch cycle' : 'Scan') + ' in progress · started ' + clock(st.since) + ' MYT (' + ago(st.since) + ')' +
-        (st.count > 1 ? ' · ' + st.count + ' runs' : '') + ' · the dashboard updates when it finishes' };
+      var run = (st.mode === 'patch' ? 'Patch cycle' : 'Scan') + ' in progress, started ' + clock(st.since) + ' MYT (' + ago(st.since) + ')' +
+        (st.count > 1 ? ', ' + st.count + ' runs' : '');
+      return { cls: 'is-running', base: run, text: run + '. The dashboard updates when it finishes.' };
     }
     var latest = {};
     hostRecs(d).forEach(function (r) { if (r.mode === 'patch' && r.host && !latest[r.host]) latest[r.host] = r; });
@@ -577,8 +585,9 @@
     var base = hosts.length ? 'Latest patch run on each host: ' + clean + ' of ' + hosts.length + ' hosts with no missing updates' : 'No patch runs in this range';
     return {
       cls: hosts.length && clean === hosts.length ? 'is-ok' : 'is-warn',
-      text: view === 'live' ? base + ' · updated ' + ago(d.generated_at)
-        : base + ' · ' + (d.source === 'evidence' ? 'from the evidence files (cost and orchestration counts only on the published site)' : 'from CloudWatch'),
+      base: base,
+      text: view === 'live' ? base + '. Updated ' + ago(d.generated_at) + '.'
+        : base + '. ' + (d.source === 'evidence' ? 'From the evidence files (cost and orchestration counts only on the published site).' : 'From CloudWatch.'),
     };
   }
   function paint(line, text, s) {
@@ -590,7 +599,7 @@
     paint($('status-line'), $('status-text'), statusFor(state.data, state.view));
     var hero = state.live ? statusFor(state.live, 'live')
       : (state.data ? statusFor(state.data, state.view) : { cls: '', text: 'Checking the latest patch results…' });
-    if (!state.live && state.data && state.data.range) hero.text = hero.text.replace(/ · .*$/, '') + ' · ' + state.data.range.label;
+    if (!state.live && state.data && state.data.range) hero.text = hero.base + ', ' + state.data.range.label + '.';
     paint($('hero-status'), $('hero-status-text'), hero);
   }
   function show(d) {
@@ -654,7 +663,7 @@
       btnLive.title = 'Live results are not available right now';
       if (state.view !== 'live') return;
       if (state.live) { drawStatus(); return; }
-      if (FALLBACK) { setView('evaluation', true); $('status-text').textContent += ' · live data is not published yet'; }
+      if (FALLBACK) { setView('evaluation', true); $('status-text').textContent += ' Live data is not published yet.'; }
       else $('status-text').textContent = 'Live data is not available yet.';
     });
   }

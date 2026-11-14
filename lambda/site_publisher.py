@@ -124,8 +124,8 @@ def eval_window(now, date_from=None, date_to=None):
     start = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=MYT)
     last = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=MYT)
     end = min(last + timedelta(days=1), now)
-    label = (f"{start.day}–{last.day} {last.strftime('%b %Y')}" if (start.year, start.month) == (last.year, last.month)
-             else f"{start.day} {start.strftime('%b %Y')} – {last.day} {last.strftime('%b %Y')}")
+    label = (f"{start.day} to {last.day} {last.strftime('%b %Y')}" if (start.year, start.month) == (last.year, last.month)
+             else f"{start.day} {start.strftime('%b %Y')} to {last.day} {last.strftime('%b %Y')}")
     return start, end, label
 
 
