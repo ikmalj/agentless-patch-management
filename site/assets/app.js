@@ -1,9 +1,9 @@
 /* Mirror of the CloudWatch dashboard PatchManagement-Dashboard (dashboard/dashboard-v3.json).
 
    Data (same format from every source, see lambda/site_publisher.py):
-     Live      data/live.json        the last 2 weeks, written by serverless-patch-site-publisher when
+     Live        data/live.json        the last 2 weeks, written by serverless-patch-site-publisher when
                                      a cycle starts or ends; re-checked every 60 s while the page is open
-     All runs  data/evaluation.json  same, for every run since the evaluation began (no end date)
+     Evaluation  data/evaluation.json  same, for every run since the evaluation began (no end date)
                window.PATCH_DATA     fallback built from evidence/ (no cost, no orchestration counts),
                                      shown when the page is opened from disk or nothing is published yet
 
@@ -27,26 +27,26 @@
   var LAYOUT = [
     { id: 'kpi', x: 0, y: 0, w: 24, h: 4, type: 'custom', title: 'Patch Summary' },
     { id: 'hosts', x: 0, y: 4, w: 16, h: 10, type: 'custom', title: 'Host Status: latest patch run per host' },
-    { id: 'severity', x: 16, y: 4, w: 8, h: 10, type: 'custom', title: 'Updates Fixed by Severity (verified by rescan)' },
+    { id: 'severity', x: 16, y: 4, w: 8, h: 4, type: 'custom', title: 'Updates Fixed by Severity (verified by rescan)' },
+    { id: 'pie', x: 16, y: 8, w: 8, h: 6, title: 'Host Outcomes (patch runs)' },
     { id: 'hostGauge', x: 0, y: 14, w: 5, h: 6, title: 'Selected host {host}: success rate' },
     { id: 'hostTime', x: 5, y: 14, w: 9, h: 6, title: 'Selected host {host}: deployment time per run (s)', scale: true },
     { id: 'hostHistory', x: 14, y: 14, w: 10, h: 6, title: 'Selected host {host}: run history', table: true },
     { id: 'barHost', x: 0, y: 20, w: 8, h: 7, title: 'Patch Deployment Time per Host (Experiment 1, longest run in range, s)', scale: true },
     { id: 'timeAll', x: 8, y: 20, w: 16, h: 7, title: 'Deployment Time per Run (each point is one host in one patch run, s)', scale: true },
-    { id: 'pie', x: 0, y: 27, w: 6, h: 7, title: 'Host Outcomes (patch runs)' },
-    { id: 'exp3', x: 6, y: 27, w: 9, h: 7, title: 'Scalability Across Multiple Hosts (Experiment 3, RHEL full-scope runs, x = hosts in run)' },
-    { id: 'orch', x: 15, y: 27, w: 9, h: 7, title: 'Orchestration Layer (Step Functions, Lambda, SNS)' },
+    { id: 'exp3', x: 0, y: 27, w: 12, h: 7, title: 'Scalability Across Multiple Hosts (Experiment 3, RHEL full-scope runs, x = hosts in run)' },
+    { id: 'orch', x: 12, y: 27, w: 12, h: 7, title: 'Orchestration Layer (Step Functions, Lambda, SNS)' },
     { id: 'perDay', x: 0, y: 34, w: 12, h: 6, title: 'Step Functions Executions per Day' },
     { id: 'platform', x: 12, y: 34, w: 12, h: 6, title: 'Success Rate by Platform (from CloudWatch Logs)', table: true },
     { id: 'costSv', x: 0, y: 40, w: 6, h: 6, title: 'Estimated Operational Cost (Experiment 4, USD)' },
     { id: 'costTable', x: 6, y: 40, w: 18, h: 6, title: 'Cost per Cycle (list price before free tier)', table: true },
     { id: 'latest', x: 0, y: 46, w: 24, h: 7, title: 'Latest Host Results (scan and patch runs)', table: true },
-    { id: 'footer', x: 0, y: 53, w: 24, h: 2, type: 'text', plain: true },
+    { id: 'footer', x: 0, y: 53, w: 24, h: 3, type: 'text', plain: true },   // one row more than CloudWatch: the site's note is longer
   ];
 
   var state = {
     view: null, data: null, host: null,
-    live: null, liveText: '', all: null, allText: '',
+    live: null, liveText: '', all: null, allText: '', chose: false,
     redrawTimer: null,
   };
 
@@ -78,6 +78,11 @@
     var d = myt(ms);
     return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()) + ' ' +
       pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds()) + '.' + pad(d.getUTCMilliseconds(), 3);
+  }
+  var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function dayTime(ms) {                                                  // "14 Nov 2026, 16:15", in MYT
+    var d = myt(ms);
+    return d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()] + ' ' + d.getUTCFullYear() + ', ' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes());
   }
   function clock(iso) { var d = myt(Date.parse(iso)); return pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()); }
   function ago(iso) {
@@ -305,7 +310,7 @@
       'The coloured panels at the top are CloudWatch custom widgets drawn by the read-only Lambda serverless-patch-summary-widget. ' +
       'No monitoring agent is installed on any host. Success counts only updates confirmed fixed by the post-install rescan. ' +
       'Cost is a list-price estimate from the execution history, before the free tier. Microsoft Defender updates are excluded from the Windows counts by design. ' +
-      'Live shows the last 2 weeks; All runs shows every run since the evaluation began.'));
+      'Live shows the last 2 weeks; Evaluation shows every run since the evaluation began.'));
     md.appendChild(p); body.appendChild(md);
   };
   function custom(name) {
@@ -578,18 +583,21 @@
     if (view === 'live' && st.state === 'running') {
       var run = (st.mode === 'patch' ? 'Patch cycle' : 'Scan') + ' in progress, started ' + clock(st.since) + ' MYT (' + ago(st.since) + ')' +
         (st.count > 1 ? ', ' + st.count + ' runs' : '');
-      return { cls: 'is-running', base: run, text: run + '. The dashboard updates when it finishes.' };
+      return { cls: 'is-running', hero: run + '.', text: 'The dashboard updates when this ' + (st.mode === 'patch' ? 'patch cycle' : 'scan') + ' finishes.' };
     }
     var latest = {};
     hostRecs(d).forEach(function (r) { if (r.mode === 'patch' && r.host && !latest[r.host]) latest[r.host] = r; });
     var hosts = Object.keys(latest), clean = hosts.filter(function (h) { return latest[h].after === 0; }).length;
-    var base = hosts.length ? 'Latest patch run on each host: ' + clean + ' of ' + hosts.length + ' hosts with no missing updates' : 'No patch runs in this range';
-    return {
-      cls: hosts.length && clean === hosts.length ? 'is-ok' : 'is-warn',
-      base: base,
-      text: view === 'live' ? base + '. Updated ' + ago(d.generated_at) + '.'
-        : base + '. ' + (d.source === 'evidence' ? 'From the evidence files (cost and orchestration counts only on the published site).' : 'From CloudWatch.'),
-    };
+    var span = view === 'live' && d.range && d.range.label ? 'the ' + d.range.label.toLowerCase() : 'this range';
+    var base = hosts.length ? 'Latest patch run on each host: ' + clean + ' of ' + hosts.length + ' hosts with no missing updates' : 'No patch runs in ' + span;
+    // The hero says how the hosts stand; the dashboard line says how recent the data is and where
+    // it comes from, so the same sentence is not shown twice.
+    var last = 0;
+    cycleRecs(d).forEach(function (r) { if (r.mode === 'patch') last = Math.max(last, tsMs(r._ts) || 0); });
+    var recent = last ? 'Last patch cycle: ' + dayTime(last) + ' MYT.'
+      : 'No patch cycles in ' + span + '.' + (view === 'live' ? ' Evaluation shows the earlier runs.' : '');
+    var from = view === 'live' ? '' : (d.source === 'evidence' ? 'From the evidence files (cost and orchestration counts only on the published site). ' : 'From CloudWatch. ');
+    return { cls: hosts.length && clean === hosts.length ? 'is-ok' : 'is-warn', hero: base + '.', text: from + recent };
   }
   function paint(line, text, s) {
     line.classList.remove('is-ok', 'is-warn', 'is-running');
@@ -598,9 +606,14 @@
   }
   function drawStatus() {
     paint($('status-line'), $('status-text'), statusFor(state.data, state.view));
-    var hero = state.live ? statusFor(state.live, 'live')
+    // The line under the page title speaks for the live data; when the last 2 weeks hold no patch
+    // run (and none is running), it speaks for the Evaluation data instead.
+    var liveNow = state.live && (hasPatch(state.live) || (state.live.status || {}).state === 'running');
+    var hero = liveNow ? statusFor(state.live, 'live')
+      : state.all ? statusFor(state.all, 'all')
+      : state.live ? statusFor(state.live, 'live')
       : (state.data ? statusFor(state.data, state.view) : { cls: '', text: 'Checking the latest patch results…' });
-    paint($('hero-status'), $('hero-status-text'), hero);
+    paint($('hero-status'), $('hero-status-text'), { cls: hero.cls, text: hero.hero || hero.text });
   }
   function show(d) {
     state.data = d;
@@ -613,8 +626,8 @@
 
   // ------------------------------------------------------------ views and loading
   // Live: the last 2 weeks (data/live.json), re-checked every POLL_MS.
-  // All runs: every run since the evaluation began (data/evaluation.json, no end date).
-  // Opened from disk, or before the publisher has run, All runs shows the evidence fallback.
+  // Evaluation ('all' in the code): every run since the evaluation began (data/evaluation.json,
+  // no end date). Opened from disk, or before the publisher has run, it shows the evidence fallback.
   var btnLive = $('view-live'), btnAll = $('view-all');
   var fromDisk = window.location.protocol === 'file:';
 
@@ -622,7 +635,7 @@
     if (fromDisk) return;
     try {
       var url = new URL(window.location.href);
-      if (state.view === 'all') url.searchParams.set('view', 'all'); else url.searchParams.delete('view');
+      if (state.view === 'all') url.searchParams.set('view', 'evaluation'); else url.searchParams.delete('view');
       if (state.host) url.searchParams.set('host', state.host); else url.searchParams.delete('host');
       window.history.replaceState(null, '', url);
     } catch (e) { /* the view still works */ }
@@ -651,7 +664,7 @@
       if (!hasPatch(x.d)) return;            // nothing in CloudWatch yet: keep the evidence view
       var changed = x.text !== state.allText;
       state.all = x.d; state.allText = x.text;
-      if (state.view === 'all' && (changed || state.data !== state.all)) show(x.d);
+      if (state.view === 'all' && (changed || state.data !== state.all)) show(x.d); else drawStatus();
     }).catch(function () { /* keep what is shown */ });
   }
   function loadLive() {
@@ -660,6 +673,9 @@
       if (changed) { state.live = x.d; state.liveText = x.text; }
       btnLive.title = '';
       if (state.view !== 'live') { drawStatus(); return; }
+      // Nothing in the last 2 weeks and the visitor has not picked a view: open Evaluation, so the
+      // page does not greet them with an empty dashboard. Live stays one click away.
+      if (!state.chose && !hasPatch(x.d) && (x.d.status || {}).state !== 'running') { setView('all', true); return; }
       if (changed || state.data !== state.live) show(state.live); else drawStatus();
     }).catch(function () {
       btnLive.title = 'Live results are not available right now';
@@ -669,8 +685,8 @@
       else $('status-text').textContent = 'Live data is not available yet.';
     });
   }
-  btnLive.addEventListener('click', function () { if (state.view !== 'live') setView('live'); });
-  btnAll.addEventListener('click', function () { if (state.view !== 'all') setView('all'); });
+  btnLive.addEventListener('click', function () { state.chose = true; if (state.view !== 'live') setView('live'); });
+  btnAll.addEventListener('click', function () { state.chose = true; if (state.view !== 'all') setView('all'); });
   if (fromDisk) { btnLive.disabled = true; btnLive.title = 'Live results need the published site'; if (!FALLBACK) btnAll.disabled = true; }
 
   if (!fromDisk) {
@@ -681,7 +697,7 @@
     }, POLL_MS);
     document.addEventListener('visibilitychange', function () { if (!document.hidden) loadLive(); });
   }
-  // ?view=all opens All runs; the earlier ?view=evaluation links open it too.
+  // ?view=evaluation opens Evaluation; ?view=all (its earlier name) opens it too.
   var asked = new URLSearchParams(window.location.search).get('view');
   var wanted = (asked === 'all' || asked === 'evaluation' || fromDisk) ? 'all' : 'live';
   if (fromDisk && !FALLBACK) $('status-text').textContent = 'No results to show yet.';

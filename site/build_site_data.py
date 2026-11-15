@@ -69,7 +69,7 @@ def main():
     to = args.date_to or starts[-1].astimezone(MYT).strftime("%Y-%m-%d")
     far_future = datetime(9999, 1, 1, tzinfo=timezone.utc)
     start, end, label = site_publisher.eval_window(far_future, frm, to)
-    if not args.date_to:        # open-ended, named like the publisher's All runs view ("Since 1 Nov 2026")
+    if not args.date_to:        # open-ended, named like the publisher's Evaluation view ("Since 1 Nov 2026")
         label = site_publisher.eval_window(far_future, frm, None)[2]
     if end <= start:
         sys.exit("--to is before --from")

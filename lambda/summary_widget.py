@@ -198,9 +198,9 @@ def view_kpi(s):
         pct, ok, att, n = s[key]
         c1, c2 = rate_colour(pct)
         val = "-" if pct is None else f"{pct:.1f}"
-        sub = f"{ok:,} / {att:,} verified, {n} host runs" if att else "no patch runs in range"
+        sub = f"{ok:,} / {att:,} verified, {n} host run{'' if n == 1 else 's'}" if att else "no patch runs in range"
         out.append(tile(label, val, "%" if pct is not None else "", sub, c1, c2))
-    out.append(tile("Patch cycles", s["cycles"], "", f"{s['host_failures']} host failure(s)", "#3b82f6", "#1d4ed8"))
+    out.append(tile("Patch cycles", s["cycles"], "", f"{s['host_failures']} host failure{'' if s['host_failures'] == 1 else 's'}", "#3b82f6", "#1d4ed8"))
     avg = s["avg_cycle_s"]
     out.append(tile("Avg cycle time", "-" if avg is None else f"{avg / 60:.1f}", "" if avg is None else "min",
                     "trigger to verified result", "#a855f7", "#7e22ce"))

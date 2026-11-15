@@ -31,7 +31,7 @@ $SiteBucket       = "serverless-patch-site-$Account"
 $SiteOacName      = 'serverless-patch-site-oac'
 $SiteComment      = 'serverless-patch project website'
 $SiteDomain       = 'fyp.ikmaljohari.my'   # custom domain (DNS at Cloudflare); '' for the cloudfront.net address only
-$SiteFrom         = '2026-11-01'           # "All runs" view: first day, YYYY-MM-DD (MYT); '' = no All runs data from CloudWatch
+$SiteFrom         = '2026-11-01'           # Evaluation view: first day, YYYY-MM-DD (MYT); '' = no Evaluation data from CloudWatch
 $SiteTo           = ''                     # last day, inclusive; '' = no end date (up to the latest run), so it never needs changing
 $SitePublisherFn  = 'serverless-patch-site-publisher'   # Live view: rewrites data/live.json after each cycle
 $SitePublisherRole = 'serverless-patch-site-publisher-role'

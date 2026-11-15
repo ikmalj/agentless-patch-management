@@ -219,8 +219,11 @@ neither has an end date, so nothing needs changing as more cycles run:
 
 | View | Data | Updates |
 |---|---|---|
-| **Live** (default) | `data/live.json`: last `$SiteLiveDays` days (14, "Last 2 weeks") from CloudWatch | By itself: rewritten when a cycle starts or finishes; open pages re-check every 60 s and show "Patch cycle in progress" while one runs |
-| **All runs** (`?view=all`) | `data/evaluation.json`: every run since `$SiteFrom` ("Since 1 Nov 2026") from CloudWatch; falls back to `data/patch-data.js` (built from `evidence\`, no cost or orchestration counts) | When the publisher runs |
+| **Live** (default) | `data/live.json`: last `$SiteLiveDays` days (14, "Last 2 weeks") from CloudWatch | By itself: rewritten when a cycle starts or finishes, and once a day; open pages re-check every 60 s and show "Patch cycle in progress" while one runs |
+| **Evaluation** (`?view=evaluation`) | `data/evaluation.json`: every run since `$SiteFrom` ("Since 1 Nov 2026") from CloudWatch; falls back to `data/patch-data.js` (built from `evidence\`, no cost or orchestration counts) | When the publisher runs (after every cycle, and once a day) |
+
+When the last 2 weeks hold no patch cycle, the page opens on Evaluation instead of an empty Live view
+(Live stays one click away).
 
 | File | Purpose |
 |---|---|
@@ -233,7 +236,7 @@ neither has an end date, so nothing needs changing as more cycles run:
 | `site/build_site_data.py` | Builds that fallback: evidence reports (`cycle-*.json` and the Experiment 3 runs `exp3-*-n*.json`) -> metrics records (`lambda/metrics.py`) -> the publisher's format |
 | `lambda/site_publisher.py` | Lambda `serverless-patch-site-publisher`: writes `data/live.json` and `data/evaluation.json` |
 
-To look at the page locally (opened from disk, All runs shows the evidence files; Live needs the published site):
+To look at the page locally (opened from disk, Evaluation shows the evidence files; Live needs the published site):
 
 ```powershell
 python site\build_site_data.py
@@ -261,7 +264,7 @@ the other deploy scripts (safe to run again):
 | CloudFront distribution (comment `serverless-patch project website`) | HTTPS only, AWS managed caching and security-headers policies, `index.html` as root |
 | Bucket policy | `s3:GetObject` for this distribution's ARN only |
 
-The All runs view starts on `$SiteFrom` in `config.ps1` (1 Nov 2026, the start of the evaluation; Malaysia
+The Evaluation view starts on `$SiteFrom` in `config.ps1` (1 Nov 2026, the start of the evaluation; Malaysia
 time) and has no end date, because `$SiteTo` is empty. Set `$SiteTo` (or run
 `.\deploy-site.ps1 -From 2026-11-01 -To 2026-11-13`) only to freeze it to a fixed period. The evidence
 fallback covers the same days.
@@ -285,6 +288,10 @@ serverless-patch-cycle starts / finishes
         asks Step Functions which executions are running
         writes data/live.json and data/evaluation.json, clears both in CloudFront
    -> open pages re-check data/live.json every 60 s
+
+every day at 00:05 MYT
+   -> EventBridge rule serverless-patch-site-publish-daily -> the same Lambda,
+      so "Last 2 weeks" keeps moving when no cycle runs
 ```
 
 - For a patch cycle that has just succeeded, the publisher waits up to 90 s for its metrics record to

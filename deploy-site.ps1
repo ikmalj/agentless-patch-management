@@ -10,8 +10,9 @@
     6. Custom domain (optional): ACM certificate in us-east-1, then the domain on the distribution
     7. Upload site\ and clear the CloudFront cache
     8. Live updates: Lambda serverless-patch-site-publisher + EventBridge rule on every status change
-       of the state machine; it rewrites data/live.json (last $SiteLiveDays days) and data/evaluation.json
-       (the All runs view: since $SiteFrom, no end date unless $SiteTo is set) from the same CloudWatch
+       of the state machine, and once a day (00:05 MYT) so "Last 2 weeks" stays true when no cycle
+       runs; it rewrites data/live.json (last $SiteLiveDays days) and data/evaluation.json (the
+       Evaluation view: since $SiteFrom, no end date unless $SiteTo is set) from the same CloudWatch
        data as PatchManagement-Dashboard. First publish now.
   Safe to run again: every step reuses what already exists. After this, the Live view updates by
   itself; run the script again only to change the page, the period or the domain.
@@ -262,7 +263,7 @@ $keys = foreach ($f in $local) {
     $key
 }
 # Remove objects that are no longer in site\. The publisher Lambda's files are not in site\: keep them.
-# data/evaluation.json (All runs) is kept only while $SiteFrom is set; otherwise an old copy is removed.
+# data/evaluation.json (Evaluation view) is kept only while $SiteFrom is set; otherwise an old copy is removed.
 $publisherFiles = @('data/live.json') + $(if ($From) { @('data/evaluation.json') } else { @() })
 $remote = @((Invoke-Aws s3api list-objects-v2 --bucket $SiteBucket).Contents | ForEach-Object Key)
 foreach ($old in ($remote | Where-Object { $_ -and $_ -notin $keys -and $_ -notin $publisherFiles })) {
@@ -381,6 +382,22 @@ if (-not $hasPerm) {
 }
 Write-Ok "EventBridge rule $ruleName -> $SitePublisherFn (RUNNING, SUCCEEDED, FAILED, TIMED_OUT, ABORTED)"
 
+# Once a day as well (00:05 MYT = 16:05 UTC), so the rolling periods move on when no cycle runs.
+$dailyRule = "$ruleName-daily"
+$daily = Invoke-Aws events put-rule --name $dailyRule --schedule-expression 'cron(5 16 * * ? *)' --state ENABLED `
+    --description 'Daily refresh of the website data (00:05 MYT)' --tags 'Key=project,Value=serverless-patch'
+Invoke-Aws events put-targets --rule $dailyRule --targets "Id=site-publisher,Arn=$pubFnArn" | Out-Null
+$hasDaily = $false
+if (Test-Aws lambda get-policy --function-name $SitePublisherFn) {
+    $pol = (Invoke-Aws lambda get-policy --function-name $SitePublisherFn).Policy | ConvertFrom-Json
+    $hasDaily = [bool]($pol.Statement | Where-Object Sid -eq 'eventbridge-site-publish-daily')
+}
+if (-not $hasDaily) {
+    Invoke-Aws lambda add-permission --function-name $SitePublisherFn --statement-id 'eventbridge-site-publish-daily' `
+        --action 'lambda:InvokeFunction' --principal 'events.amazonaws.com' --source-arn $daily.RuleArn | Out-Null
+}
+Write-Ok "EventBridge rule $dailyRule -> $SitePublisherFn (every day at 00:05 MYT)"
+
 # First publish now, so the Live view has data before the next cycle.
 Save-Json @{ source = 'deploy-site.ps1' } (Join-Path $BuildDir 'site-publisher-test.json')
 $meta = Invoke-Aws lambda invoke --function-name $SitePublisherFn --cli-binary-format raw-in-base64-out `
@@ -407,6 +424,7 @@ $summary = [ordered]@{
     oac_id          = $oacId
     live_publisher  = $pubFnArn
     live_rule       = $ruleName
+    daily_rule      = $dailyRule
     live_days       = $SiteLiveDays
     files           = @($files)
 }

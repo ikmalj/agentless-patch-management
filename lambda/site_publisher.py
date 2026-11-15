@@ -4,7 +4,7 @@ The website mirrors the CloudWatch dashboard PatchManagement-Dashboard. This Lam
 same data the dashboard reads and writes it as JSON the website draws:
 
   data/live.json        last LIVE_DAYS days, plus "patch cycle in progress" status
-  data/evaluation.json  the website's "All runs" view: every run since EVAL_FROM (Malaysia time),
+  data/evaluation.json  the website's Evaluation view: every run since EVAL_FROM (Malaysia time),
                         up to now, or up to EVAL_TO if a last day is set; written only if EVAL_FROM is set
 
 Each file holds:
@@ -16,7 +16,8 @@ Each file holds:
             executions-per-day chart (CloudWatch GetMetricData)
 
 Triggered by EventBridge on every status change of serverless-patch-cycle (RUNNING, SUCCEEDED,
-FAILED, TIMED_OUT, ABORTED), and once by deploy-site.ps1. No host access, no secrets, no VPC.
+FAILED, TIMED_OUT, ABORTED), once a day by a schedule (so "Last 2 weeks" keeps moving when no cycle
+runs), and once by deploy-site.ps1. No host access, no secrets, no VPC.
 """
 import json
 import os
@@ -126,7 +127,7 @@ def live_label(days):
 
 
 def eval_window(now, date_from=None, date_to=None):
-    """(start, end, label) for the "All runs" period, whole days in Malaysia time, or None.
+    """(start, end, label) for the Evaluation view's period, whole days in Malaysia time, or None.
 
     A first day with no last day is open-ended: it runs up to now and is labelled "Since 1 Nov 2026",
     so nothing needs changing as more cycles run. With both days it is a fixed period.
