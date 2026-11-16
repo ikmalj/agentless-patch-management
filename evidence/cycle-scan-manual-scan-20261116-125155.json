@@ -1,0 +1,103 @@
+{
+  "execution": "arn:aws:states:ap-southeast-5:588589592508:execution:serverless-patch-cycle:manual-scan-20261116-125155",
+  "status": "SUCCEEDED",
+  "error": null,
+  "report": {
+    "run_id": "manual-scan-20261116-125155",
+    "mode": "scan",
+    "percent": 100,
+    "started": "2026-11-16T04:51:57.191Z",
+    "finished": "2026-11-16T04:52:04.688Z",
+    "duration_s": 7.5,
+    "hosts_total": 3,
+    "patched": 0,
+    "patched_partial": 0,
+    "compliant": 0,
+    "scanned": 3,
+    "skipped": 0,
+    "failed": 0,
+    "results": [
+      {
+        "host": "serverless-patch-rhel-01",
+        "ip": "10.0.1.175",
+        "instance_id": "i-0ba983a12665d852f",
+        "platform": "rhel",
+        "workload": "nginx",
+        "unit": "RHSA",
+        "status": "scanned",
+        "advisories_before": 425,
+        "by_severity_before": {
+          "Critical": 2,
+          "Important": 185,
+          "Moderate": 214,
+          "Low": 24
+        },
+        "pending_security_packages_before": 149,
+        "pending_packages_before": 289,
+        "kernel": "5.14.0-284.90.1.el9_2.x86_64",
+        "agent_present": false,
+        "healthy": true,
+        "health_detail": "http 200",
+        "scan_s": 4.8,
+        "duration_s": 6.2
+      },
+      {
+        "host": "serverless-patch-rhel-02",
+        "ip": "10.0.1.254",
+        "instance_id": "i-008641b7be92f9871",
+        "platform": "rhel",
+        "workload": "mysql",
+        "unit": "RHSA",
+        "status": "scanned",
+        "advisories_before": 425,
+        "by_severity_before": {
+          "Critical": 2,
+          "Important": 184,
+          "Moderate": 215,
+          "Low": 24
+        },
+        "pending_security_packages_before": 147,
+        "pending_packages_before": 289,
+        "kernel": "5.14.0-284.90.1.el9_2.x86_64",
+        "agent_present": false,
+        "healthy": true,
+        "health_detail": "sakila.film rows 1000",
+        "scan_s": 4.8,
+        "duration_s": 6.2
+      },
+      {
+        "host": "serverless-patch-win-01",
+        "ip": "10.0.1.189",
+        "instance_id": "i-0b6462c157a7d6763",
+        "platform": "windows",
+        "workload": "iis",
+        "unit": "KB",
+        "status": "scanned",
+        "advisories_before": 4,
+        "by_severity_before": {
+          "Critical": 0,
+          "Important": 2,
+          "Moderate": 0,
+          "Low": 0,
+          "Unspecified": 2
+        },
+        "pending_security_packages_before": 4,
+        "pending_packages_before": 4,
+        "kernel": "10.0.20348.5499",
+        "agent_present": false,
+        "healthy": true,
+        "health_detail": "http 200",
+        "update_ids": [
+          "KB5128928",
+          "KB5135079",
+          "KB890830",
+          "KB5131090"
+        ],
+        "defender_excluded": [],
+        "scan_method": "winrm",
+        "scan_s": 5.8,
+        "duration_s": 7.3
+      }
+    ]
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "deployed_at": "2026-11-14T10:32:48",
+  "deployed_at": "2026-11-16T13:14:49",
   "url": "https://fyp.ikmaljohari.my/",
   "cloudfront_url": "https://dnk953cz59lco.cloudfront.net/",
   "custom_domain": "fyp.ikmaljohari.my",
@@ -10,7 +10,8 @@
   "oac_id": "ERUAYBEJPTCN3",
   "live_publisher": "arn:aws:lambda:ap-southeast-5:588589592508:function:serverless-patch-site-publisher",
   "live_rule": "serverless-patch-site-publish",
-  "live_days": 30,
+  "daily_rule": "serverless-patch-site-publish-daily",
+  "live_days": 14,
   "files": [
     "index.html",
     "assets/app.js",
