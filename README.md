@@ -225,13 +225,14 @@ neither has an end date, so nothing needs changing as more cycles run:
 When the last 2 weeks hold no patch cycle, the page opens on Evaluation instead of an empty Live view
 (Live stays one click away).
 
-**Security updates per host.** The "Selected host: security updates" table lists the host's updates at
-its latest scan in the three columns of `dnf updateinfo list` (advisory, severity, package build) plus
-the state, `available` or `installed`; for Windows the rows are KBs. Each scan step logs these lines to
+**Security updates per host.** Two tables side by side, as the Red Hat guide *Identifying security
+updates* lists them: **not installed** (`dnf updateinfo list --security`) and **installed**
+(`dnf updateinfo list --security --installed`), each in the three columns of `dnf updateinfo list`
+(advisory, severity, package build); for Windows the rows are KBs. Each scan step logs these lines to
 its own Lambda log group (`record = "update"`, closed by one `update_scan` line with the counts), so
-nothing extra passes through the state machine. The CloudWatch widget queries those log groups
-directly (newest scan first, 1,000 lines); the publisher writes the latest scan of each host to
-`data/updates.json` for the website. The list appears after the first scan or patch cycle that runs
+nothing extra passes through the state machine. The two CloudWatch widgets query those log groups
+directly (newest scan first, 1,000 lines each); the publisher writes the latest scan of each host to
+`data/updates.json` for the website (up to 1,000 lines of each). The lists appear after the first scan or patch cycle that runs
 with the updated patch Lambdas (`.\deploy-framework.ps1`).
 
 | File | Purpose |

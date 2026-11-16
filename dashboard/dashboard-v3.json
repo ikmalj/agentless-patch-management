@@ -198,13 +198,26 @@
    "type": "log",
    "x": 0,
    "y": 23,
-   "width": 24,
+   "width": 12,
    "height": 8,
    "properties": {
-    "title": "Selected host __DEFAULT_HOST__: security updates (latest scan first)",
+    "title": "Selected host __DEFAULT_HOST__: security updates not installed",
     "region": "__REGION__",
     "view": "table",
-    "query": "SOURCE '/aws/lambda/__RHEL_FN__' | SOURCE '/aws/lambda/__WIN_FN__' | filter record = 'update' and host = '__DEFAULT_HOST__' | sort scan_ts desc, state asc, id desc | fields id, severity, package, state | limit 1000"
+    "query": "SOURCE '/aws/lambda/__RHEL_FN__' | SOURCE '/aws/lambda/__WIN_FN__' | filter record = 'update' and host = '__DEFAULT_HOST__' and state = 'available' | sort scan_ts desc, id desc | fields id, severity, package | limit 1000"
+   }
+  },
+  {
+   "type": "log",
+   "x": 12,
+   "y": 23,
+   "width": 12,
+   "height": 8,
+   "properties": {
+    "title": "Selected host __DEFAULT_HOST__: security updates installed",
+    "region": "__REGION__",
+    "view": "table",
+    "query": "SOURCE '/aws/lambda/__RHEL_FN__' | SOURCE '/aws/lambda/__WIN_FN__' | filter record = 'update' and host = '__DEFAULT_HOST__' and state = 'installed' | sort scan_ts desc, id desc | fields id, severity, package | limit 1000"
    }
   },
   {

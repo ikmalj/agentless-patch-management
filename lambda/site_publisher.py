@@ -180,7 +180,7 @@ def fetch_records(start, end, logs):
 
 
 # ------------------------------------------------------------------ update list (per host)
-UPDATE_ROWS_MAX = 4000      # rows per host in data/updates.json
+UPDATE_ROWS_MAX = 1000      # rows per host and state in data/updates.json (the website shows 1,000 of each)
 _SEV_ORDER = {"Critical": 0, "Important": 1, "Moderate": 2, "Low": 3}
 _HOST_OK = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
 
@@ -259,14 +259,14 @@ def _updates_from(group, start, end, logs, hosts):
             (avail if state == "available" else inst).append(list(row) + [state])
         avail.sort(key=lambda r: (_SEV_ORDER.get(r[1], 9), r[0], r[2]))
         inst.sort(key=lambda r: (r[0], r[2]), reverse=True)
-        rows = avail + inst
+        rows = avail[:UPDATE_ROWS_MAX] + inst[:UPDATE_ROWS_MAX]
         hosts[h] = {
             "platform": s.get("platform"), "unit": s.get("unit"),
             "scan_at": datetime.fromtimestamp(s["scan_ts"], timezone.utc).isoformat(timespec="seconds"),
             "available": len(avail), "installed": len(inst),
-            "truncated": bool(s.get("truncated")) or len(lines) >= 10000 or len(rows) > UPDATE_ROWS_MAX,
+            "truncated": bool(s.get("truncated")) or len(lines) >= 10000 or max(len(avail), len(inst)) > UPDATE_ROWS_MAX,
             "installed_error": bool(s.get("installed_error")),
-            "rows": rows[:UPDATE_ROWS_MAX],
+            "rows": rows,
         }
 
 

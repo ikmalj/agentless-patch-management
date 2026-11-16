@@ -33,7 +33,8 @@
     { id: 'hostGauge', x: 0, y: 14, w: 5, h: 6, title: 'Selected host {host}: success rate' },
     { id: 'hostTime', x: 5, y: 14, w: 9, h: 6, title: 'Selected host {host}: deployment time per run (s)', scale: true },
     { id: 'hostHistory', x: 14, y: 14, w: 10, h: 6, title: 'Selected host {host}: run history', table: true },
-    { id: 'updates', x: 0, y: 20, w: 24, h: 8, title: 'Selected host {host}: security updates (latest scan first)', table: true },
+    { id: 'updAvail', x: 0, y: 20, w: 12, h: 8, title: 'Selected host {host}: security updates not installed', table: true },
+    { id: 'updInst', x: 12, y: 20, w: 12, h: 8, title: 'Selected host {host}: security updates installed', table: true },
     { id: 'barHost', x: 0, y: 28, w: 8, h: 7, title: 'Patch Deployment Time per Host (Experiment 1, longest run in range, s)', scale: true },
     { id: 'timeAll', x: 8, y: 28, w: 16, h: 7, title: 'Deployment Time per Run (each point is one host in one patch run, s)', scale: true },
     { id: 'exp3', x: 0, y: 35, w: 12, h: 7, title: 'Scalability Across Multiple Hosts (Experiment 3, RHEL full-scope runs, x = hosts in run)' },
@@ -319,28 +320,34 @@
   // The selected host's security updates at its latest scan, in the three columns of
   // `dnf updateinfo list` (advisory, severity, package) plus the state. data/updates.json comes from
   // the patch Lambdas' logs; the CloudWatch widget reads the same log lines, 1,000 at a time.
-  var UPDATE_COLS = ['id', 'severity', 'package', 'state'], UPDATE_ROWS = 1000;
-  W.updates = function (body) {
-    var all = state.updates && state.updates.hosts, u = all && all[state.host];
-    if (!u) {
-      note(body, fromDisk ? 'The update list is read from the patch Lambdas\u2019 logs, so it appears on the published site only.'
-        : all ? 'No update list recorded for this host yet. It appears after the next scan or patch cycle.'
-        : 'The update list appears after the next scan or patch cycle.');
-      return;
-    }
-    var rows = u.rows || [], when = dayTime(Date.parse(u.scan_at)) + ' MYT';
-    if (!rows.length) {
-      note(body, u.installed_error ? 'The latest scan (' + when + ') found no available security updates, and the installed list could not be read.'
-        : 'The latest scan (' + when + ') listed no security updates for this host.');
-      return;
-    }
-    var total = num(u.available) + num(u.installed), shown = Math.min(rows.length, UPDATE_ROWS);
-    body.appendChild(el('p', 'cw-foot cw-tfoot', 'Latest scan ' + when + ': ' + num(u.available).toLocaleString('en') + ' available, ' +
-      num(u.installed).toLocaleString('en') + ' installed.' +
-      (total > shown ? ' Showing the first ' + shown.toLocaleString('en') + ' of ' + total.toLocaleString('en') + ' lines.' : '') +
-      (u.installed_error ? ' The installed list could not be read at this scan.' : '')));
-    table(body, UPDATE_COLS, rows.slice(0, UPDATE_ROWS));
-  };
+  // Two tables side by side, as the Red Hat guide lists them: what the scan found still missing
+  // (`dnf updateinfo list --security`) and what is already installed (`... --installed`).
+  var UPDATE_COLS = ['id', 'severity', 'package'], UPDATE_ROWS = 1000;
+  function updateList(state_, count, empty) {
+    return function (body) {
+      var all = state.updates && state.updates.hosts, u = all && all[state.host];
+      if (!u) {
+        note(body, fromDisk ? 'The update list is read from the patch Lambdas\u2019 logs, so it appears on the published site only.'
+          : all ? 'No update list recorded for this host yet. It appears after the next scan or patch cycle.'
+          : 'The update list appears after the next scan or patch cycle.');
+        return;
+      }
+      var when = dayTime(Date.parse(u.scan_at)) + ' MYT';
+      var rows = (u.rows || []).filter(function (r) { return r[3] === state_; });
+      var total = num(u[count]);
+      if (!rows.length) {
+        note(body, state_ === 'installed' && u.installed_error ? 'The installed list could not be read at the latest scan (' + when + ').'
+          : empty + ' (latest scan ' + when + ').');
+        return;
+      }
+      var shown = Math.min(rows.length, UPDATE_ROWS);
+      body.appendChild(el('p', 'cw-foot cw-tfoot', 'Latest scan ' + when + ': ' + total.toLocaleString('en') + ' line' + (total === 1 ? '' : 's') + '.' +
+        (total > shown ? ' Showing the first ' + shown.toLocaleString('en') + '.' : '')));
+      table(body, UPDATE_COLS, rows.slice(0, UPDATE_ROWS).map(function (r) { return r.slice(0, 3); }));
+    };
+  }
+  W.updAvail = updateList('available', 'available', 'Nothing left to install: no available security updates');
+  W.updInst = updateList('installed', 'installed', 'No installed security updates listed');
   function custom(name) {
     return function (body) {
       var panels = (state.data.panels || {})[isDark() ? 'dark' : 'light'] || {};
@@ -594,7 +601,7 @@
   select.addEventListener('change', function () {
     state.host = select.value;
     setUrl();
-    ['hostGauge', 'hostTime', 'hostHistory', 'updates'].forEach(redrawWidget);
+    ['hostGauge', 'hostTime', 'hostHistory', 'updAvail', 'updInst'].forEach(redrawWidget);
   });
   // Draw one widget again in place (new host, or its own data arrived).
   function redrawWidget(id) {
@@ -712,7 +719,7 @@
       var d = JSON.parse(text);
       if (!d || typeof d.hosts !== 'object') return;
       state.updates = d; state.updatesText = text;
-      redrawWidget('updates');
+      redrawWidget('updAvail'); redrawWidget('updInst');
     }).catch(function () { /* the widget keeps its note */ });
   }
   function loadLive() {
