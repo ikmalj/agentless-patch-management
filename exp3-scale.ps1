@@ -5,6 +5,9 @@
 
   Main series:  RHEL at 1, 2, 4, 6, 8 hosts (rhel-01, rhel-02 + clones rhel-03..08 of the rhel-01 baseline AMI)
   Add-on:       Windows at 1 and 2 hosts (win-01 + clone win-02 of the win-01 baseline AMI)
+  Mixed:        both platforms in the testbed ratio of two RHEL hosts to one Windows host.
+                Hosts join in the order rhel-01, rhel-02, win-01, rhel-03, rhel-04, win-02, so level 3 is
+                the testbed and level 6 doubles it (clones rhel-03, rhel-04 and win-02).
 
   Every level starts from baseline: the hosts in that level get their root volume replaced from the
   baseline AMI, then one patch cycle runs on exactly those hosts (targets), and the result is saved.
@@ -16,11 +19,13 @@
   .\exp3-scale.ps1 -Action run    -Platform rhel -Levels 1,2,4,6,8
   .\exp3-scale.ps1 -Action launch -Platform windows -Total 2       # adds win-02 (stop the RHEL hosts first)
   .\exp3-scale.ps1 -Action run    -Platform windows -Levels 1,2
+  .\exp3-scale.ps1 -Action launch -Platform mixed -Total 6         # adds rhel-03, rhel-04, win-02 (12 of 16 vCPUs)
+  .\exp3-scale.ps1 -Action run    -Platform mixed -Levels 3,6
   .\exp3-scale.ps1 -Action teardown                                # terminates every Experiment=exp3 clone
 #>
 param(
     [Parameter(Mandatory)][ValidateSet('status', 'launch', 'run', 'teardown')][string]$Action,
-    [ValidateSet('rhel', 'windows')][string]$Platform = 'rhel',
+    [ValidateSet('rhel', 'windows', 'mixed')][string]$Platform = 'rhel',
     [ValidateRange(1, 8)][int]$Total = 8,
     [string[]]$Levels = @('1', '2', '4', '6', '8'),
     [switch]$Notify,
@@ -32,19 +37,32 @@ Push-Location $PSScriptRoot
 try {
 
 $ExpTag = 'exp3'
-# Accept -Levels 1,2,4 typed at the prompt or passed as one string "1,2,4".
-$Levels = @($Levels -split '[,\s]+' | Where-Object { $_ } | ForEach-Object { [int]$_ } | Sort-Object -Unique)
-if ($Levels | Where-Object { $_ -lt 1 -or $_ -gt 8 }) { throw 'levels must be between 1 and 8' }
-$src = if ($Platform -eq 'windows') { $Hosts['win-01'] } else { $Hosts['rhel-01'] }
-$prefix = if ($Platform -eq 'windows') { 'serverless-patch-win-' } else { 'serverless-patch-rhel-' }
-$names = @(1..8 | ForEach-Object { '{0}{1:00}' -f $prefix, $_ })
-$bootWait = if ($Platform -eq 'windows') { 300 } else { 90 }
+# Mixed defaults: the testbed (3 hosts) and the testbed doubled (6 hosts).
+if ($Platform -eq 'mixed' -and -not $PSBoundParameters.ContainsKey('Levels')) { $Levels = @('3', '6') }
+if ($Platform -eq 'mixed' -and -not $PSBoundParameters.ContainsKey('Total')) { $Total = 6 }
+# Accept -Levels 1,2,4 typed at the prompt or passed as one string "1,2,4". Kept as numbers in $LevelNums
+# ($Levels is a [string[]] parameter, so numbers assigned back to it would turn into text again).
+[int[]]$LevelNums = @($Levels -split '[,\s]+' | Where-Object { $_ } | ForEach-Object { [int]$_ } | Sort-Object -Unique)
+if (-not $LevelNums -or ($LevelNums | Where-Object { $_ -lt 1 -or $_ -gt 8 })) { throw 'levels must be between 1 and 8' }
+$rhelNames = @(1..8 | ForEach-Object { 'serverless-patch-rhel-{0:00}' -f $_ })
+$winNames  = @(1..8 | ForEach-Object { 'serverless-patch-win-{0:00}' -f $_ })
+# The order in which hosts join a level: level n patches the first n names.
+$names = switch ($Platform) {
+    'rhel'    { $rhelNames }
+    'windows' { $winNames }
+    'mixed'   { @($rhelNames[0], $rhelNames[1], $winNames[0], $rhelNames[2], $rhelNames[3], $winNames[1], $rhelNames[4], $rhelNames[5]) }
+}
+$OsValues = if ($Platform -eq 'mixed') { 'rhel,windows' } else { $Platform }
+
+function Get-HostOs([string]$Name) { if ($Name -like 'serverless-patch-win-*') { 'windows' } else { 'rhel' } }
+# Clones copy rhel-01 or win-01: same AMI, instance type, subnet, security group and key.
+function Get-SourceHost([string]$Name) { if ((Get-HostOs $Name) -eq 'windows') { $Hosts['win-01'] } else { $Hosts['rhel-01'] } }
 
 function Get-Tag($inst, [string]$key) { ($inst.Tags | Where-Object Key -eq $key).Value }
 
 # All serverless-patch instances of this platform (testbed + clones), not terminated.
 function Get-PlatformHosts {
-    $r = Invoke-Aws ec2 describe-instances --filters 'Name=tag:project,Values=serverless-patch' "Name=tag:PatchOS,Values=$Platform" `
+    $r = Invoke-Aws ec2 describe-instances --filters 'Name=tag:project,Values=serverless-patch' "Name=tag:PatchOS,Values=$OsValues" `
         'Name=instance-state-name,Values=pending,running,stopping,stopped'
     @($r.Reservations.Instances | ForEach-Object {
         [pscustomobject]@{ Name = Get-Tag $_ 'Name'; Id = $_.InstanceId; State = $_.State.Name; Type = $_.InstanceType
@@ -78,7 +96,7 @@ function Wait-Running([string[]]$Ids) {
 # clones use the AMI they were launched from (rhel-01 or win-01).
 function Get-BaselineAmi([string]$Name) {
     $own = $Hosts.Values | Where-Object Name -eq $Name | Select-Object -First 1
-    if ($own) { $own.Ami } else { $src.Ami }
+    if ($own) { $own.Ami } else { (Get-SourceHost $Name).Ami }
 }
 
 # Replace the root volume of each host with its baseline AMI (same as restore-baseline.ps1).
@@ -122,60 +140,82 @@ switch ($Action) {
 # ------------------------------------------------------------------ launch
 'launch' {
     $have = Get-PlatformHosts
+    $Total = [math]::Min($Total, $names.Count)
     $want = $names[0..($Total - 1)]
     $missing = @($want | Where-Object { $_ -notin $have.Name })
     Write-Step "Launch $Platform clones up to $Total host(s)"
     if (-not $missing) { Write-Ok "all $Total already exist"; break }
-    $ref = (Invoke-Aws ec2 describe-instances --instance-ids $src.Id).Reservations[0].Instances[0]
+    # One launch per platform: each clone copies its source host (rhel-01 or win-01).
+    $plan = @(foreach ($g in @($missing | Group-Object -Property { Get-HostOs $_ })) {
+        $s = Get-SourceHost $g.Group[0]
+        $ref = (Invoke-Aws ec2 describe-instances --instance-ids $s.Id).Reservations[0].Instances[0]
+        $per = ((Invoke-Aws ec2 describe-instance-types --instance-types $ref.InstanceType).InstanceTypes[0]).VCpuInfo.DefaultVCpus
+        [pscustomobject]@{ Os = $g.Name; Names = @($g.Group); Src = $s; Ref = $ref; Per = $per }
+    })
     $v = Get-VcpuUse
-    $per = ((Invoke-Aws ec2 describe-instance-types --instance-types $ref.InstanceType).InstanceTypes[0]).VCpuInfo.DefaultVCpus
-    $notRunning = @($have | Where-Object { $_.Name -in $want -and $_.State -ne 'running' }).Count
-    $need = $v.Used + $per * ($missing.Count + $notRunning)
-    Write-Ok "new: $($missing -join ', ') ($($ref.InstanceType), $per vCPU each); vCPUs after the level runs: $need of $($v.Quota)"
+    $need = $v.Used
+    foreach ($p in $plan) { $need += $p.Per * $p.Names.Count }
+    $stopped = @($have | Where-Object { $_.Name -in $want -and $_.State -ne 'running' })
+    if ($stopped) {
+        $info = (Invoke-Aws ec2 describe-instance-types --instance-types @($stopped.Type | Sort-Object -Unique)).InstanceTypes
+        foreach ($h in $stopped) { $need += ($info | Where-Object InstanceType -eq $h.Type).VCpuInfo.DefaultVCpus }
+    }
+    foreach ($p in $plan) { Write-Ok "new $($p.Os): $($p.Names -join ', ') ($($p.Ref.InstanceType), $($p.Per) vCPU each, from $($p.Src.Name))" }
+    Write-Ok "vCPUs after the level runs: $need of $($v.Quota)"
     if ($need -gt $v.Quota) {
-        throw "not enough vCPU quota ($need > $($v.Quota)). Stop the other platform's hosts first (.\lab.ps1 stop-all, then start only what you need)."
+        throw "not enough vCPU quota ($need > $($v.Quota)). Stop the hosts this experiment does not use first (.\lab.ps1 stop-all, then start only what you need)."
     }
-    $sgs = @($ref.SecurityGroups.GroupId)
-    $tags = "ResourceType=instance,Tags=[{Key=project,Value=serverless-patch},{Key=PatchTarget,Value=true},{Key=PatchOS,Value=$Platform},{Key=Workload,Value=$(Get-Tag $ref 'Workload')},{Key=Experiment,Value=$ExpTag}]"
-    $runArgs = @('ec2', 'run-instances', '--image-id', $src.Ami, '--instance-type', $ref.InstanceType, '--count', $missing.Count,
-              '--subnet-id', $ref.SubnetId, '--security-group-ids') + $sgs + @(
-              '--metadata-options', 'HttpTokens=required,HttpEndpoint=enabled',
-              '--tag-specifications', $tags, 'ResourceType=volume,Tags=[{Key=project,Value=serverless-patch},{Key=Experiment,Value=exp3}]')
-    if ($ref.KeyName) { $runArgs += @('--key-name', $ref.KeyName) }
-    if ($ref.InstanceType -like 't*') { $runArgs += @('--credit-specification', 'CpuCredits=standard') }
-    $new = (Invoke-Aws @runArgs).Instances
-    for ($i = 0; $i -lt $new.Count; $i++) {
-        Invoke-Aws ec2 create-tags --resources $new[$i].InstanceId --tags "Key=Name,Value=$($missing[$i])" | Out-Null
-        Write-Ok "$($missing[$i])  $($new[$i].InstanceId)"
+    $launched = @()
+    foreach ($p in $plan) {
+        $ref = $p.Ref
+        $sgs = @($ref.SecurityGroups.GroupId)
+        $tags = "ResourceType=instance,Tags=[{Key=project,Value=serverless-patch},{Key=PatchTarget,Value=true},{Key=PatchOS,Value=$($p.Os)},{Key=Workload,Value=$(Get-Tag $ref 'Workload')},{Key=Experiment,Value=$ExpTag}]"
+        $runArgs = @('ec2', 'run-instances', '--image-id', $p.Src.Ami, '--instance-type', $ref.InstanceType, '--count', $p.Names.Count,
+                  '--subnet-id', $ref.SubnetId, '--security-group-ids') + $sgs + @(
+                  '--metadata-options', 'HttpTokens=required,HttpEndpoint=enabled',
+                  '--tag-specifications', $tags, 'ResourceType=volume,Tags=[{Key=project,Value=serverless-patch},{Key=Experiment,Value=exp3}]')
+        if ($ref.KeyName) { $runArgs += @('--key-name', $ref.KeyName) }
+        if ($ref.InstanceType -like 't*') { $runArgs += @('--credit-specification', 'CpuCredits=standard') }
+        $new = @((Invoke-Aws @runArgs).Instances)
+        for ($i = 0; $i -lt $new.Count; $i++) {
+            Invoke-Aws ec2 create-tags --resources $new[$i].InstanceId --tags "Key=Name,Value=$($p.Names[$i])" | Out-Null
+            Write-Ok "$($p.Names[$i])  $($new[$i].InstanceId)"
+            $launched += [pscustomobject]@{ Name = $p.Names[$i]; Id = $new[$i].InstanceId; Ami = $p.Src.Ami }
+        }
     }
-    Invoke-Aws ec2 wait instance-running --instance-ids @($new.InstanceId) | Out-Null
+    Invoke-Aws ec2 wait instance-running --instance-ids @($launched.Id) | Out-Null
     Write-Ok 'running. They are already at baseline (fresh from the AMI); every level restores them again anyway.'
-    Save-Json ([ordered]@{ launched_at = (Get-Date).ToString('s'); platform = $Platform; ami = $src.Ami
-                          instances = @($new | ForEach-Object { $_.InstanceId }); names = $missing }) `
+    Save-Json ([ordered]@{ launched_at = (Get-Date).ToString('s'); platform = $Platform
+                          instances = @($launched.Id); names = @($launched.Name); amis = @($launched.Ami) }) `
         (Join-Path $EvidenceDir ("exp3-launch-{0}-{1}.json" -f $Platform, (Get-Date -Format 'yyyyMMdd-HHmmss')))
 }
 
 # ------------------------------------------------------------------ run
 'run' {
     $all = Get-PlatformHosts
-    $maxLevel = ($Levels | Measure-Object -Maximum).Maximum
+    $maxLevel = ($LevelNums | Measure-Object -Maximum).Maximum
+    if ($maxLevel -gt $names.Count) { throw "level $maxLevel is more than the $($names.Count) hosts this platform has" }
     $use = $names[0..($maxLevel - 1)]
     $absent = @($use | Where-Object { $_ -notin $all.Name })
     if ($absent) { throw "missing hosts for level ${maxLevel}: $($absent -join ', '). Run -Action launch -Platform $Platform -Total $maxLevel first." }
     $v = Get-VcpuUse
-    Write-Step "Experiment 3 ($Platform), levels $($Levels -join ', ')"
+    Write-Step "Experiment 3 ($Platform), levels $($LevelNums -join ', ')"
     Write-Ok "vCPUs in use now: $($v.Used) of $($v.Quota)"
     Write-Note 'Each level: restore the level hosts to baseline, wait for boot, run one patch cycle on exactly those hosts.'
     Write-Note ("Email per level: " + $(if ($Notify) { 'yes' } else { 'no (use -Notify to send)' }))
     if ((Read-Host 'Type SCALE to start') -cne 'SCALE') { Write-Note 'cancelled'; break }
 
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $cols = if ($Platform -eq 'mixed') { 'Hosts', 'Status', 'Patched', 'Failed', 'CycleS', 'RhelAvgS', 'WinAvgS', 'MaxHostS', 'Before' }
+            else { 'Hosts', 'Status', 'Patched', 'Failed', 'CycleS', 'AvgHostS', 'MinHostS', 'MaxHostS', 'Before' }
     $rows = @()
-    foreach ($n in ($Levels | Sort-Object)) {
+    foreach ($n in $LevelNums) {
         $level = @($all | Where-Object { $_.Name -in $names[0..($n - 1)] })
         Write-Step "Level $n host(s): $(($level.Name | ForEach-Object { $_ -replace '^serverless-patch-', '' }) -join ', ')"
         Restore-Hosts $level
-        Write-Ok "waiting $bootWait s for boot ($(if ($Platform -eq 'windows') { 'WinRM' } else { 'SSH' }))"
+        $hasWin = [bool]($level.Name | Where-Object { (Get-HostOs $_) -eq 'windows' })
+        $bootWait = if ($hasWin) { 300 } else { 90 }
+        Write-Ok "waiting $bootWait s for boot ($(if ($hasWin) { 'WinRM' } else { 'SSH' }))"
         Start-Sleep $bootWait
 
         $runInput = [ordered]@{ mode = 'patch'; reboot = $true; percent = 100; targets = @($level.Name); notify = [bool]$Notify }
@@ -196,7 +236,10 @@ switch ($Action) {
         Save-Json ([ordered]@{ execution = $arn; status = $d.status; error = $d.error; level = $n; report = $report }) `
             (Join-Path $EvidenceDir "$($arn.Split(':')[-1]).json") -Depth 30
         $hs = @($report.results)
-        $durs = @($hs | Where-Object { $_.status -like 'patched*' } | ForEach-Object { [double]$_.duration_s })
+        $ok = @($hs | Where-Object { $_.status -like 'patched*' })
+        $durs = @($ok | ForEach-Object { [double]$_.duration_s })
+        $rd = @($ok | Where-Object platform -eq 'rhel' | ForEach-Object { [double]$_.duration_s })
+        $wd = @($ok | Where-Object platform -eq 'windows' | ForEach-Object { [double]$_.duration_s })
         $row = [pscustomobject]@{
             Hosts      = $n
             Status     = $d.status
@@ -206,17 +249,19 @@ switch ($Action) {
             AvgHostS   = if ($durs) { [math]::Round(($durs | Measure-Object -Average).Average, 1) } else { $null }
             MaxHostS   = if ($durs) { ($durs | Measure-Object -Maximum).Maximum } else { $null }
             MinHostS   = if ($durs) { ($durs | Measure-Object -Minimum).Minimum } else { $null }
+            RhelAvgS   = if ($rd) { [math]::Round(($rd | Measure-Object -Average).Average, 1) } else { $null }
+            WinAvgS    = if ($wd) { [math]::Round(($wd | Measure-Object -Average).Average, 1) } else { $null }
             Before     = (@($hs.advisories_before) | Select-Object -Unique) -join '/'
             Execution  = $arn.Split(':')[-1]
         }
         $rows += $row
-        $row | Format-Table Hosts, Status, Patched, Failed, CycleS, AvgHostS, MinHostS, MaxHostS, Before -AutoSize | Out-String -Width 200 | Write-Host
+        $row | Format-Table $cols -AutoSize | Out-String -Width 200 | Write-Host
     }
 
     Write-Step "Experiment 3 summary ($Platform)"
-    $rows | Format-Table Hosts, Status, Patched, Failed, CycleS, AvgHostS, MinHostS, MaxHostS, Before -AutoSize | Out-String -Width 200 | Write-Host
+    $rows | Format-Table $cols -AutoSize | Out-String -Width 200 | Write-Host
     $csv = Join-Path $EvidenceDir "exp3-$Platform-summary-$stamp.csv"
-    $rows | Export-Csv $csv -NoTypeInformation -Encoding utf8
+    $rows | Export-Csv $csv -Encoding utf8
     Write-Ok "saved $csv"
     Write-Note 'Hosts are left patched. Teardown clones with: .\exp3-scale.ps1 -Action teardown'
 }
@@ -230,7 +275,7 @@ switch ($Action) {
     if (-not $clones) { Write-Ok 'none found'; break }
     # Safety: never the testbed hosts.
     $clones = @($clones | Where-Object { $_.Id -notin @($Hosts.Values.Id) })
-    $clones | Format-Table Name, Id, State -AutoSize | Out-String | Write-Host
+    $clones | Format-Table Name, Id, State -AutoSize | Out-String -Width 200 | Write-Host
     if ((Read-Host 'Type TERMINATE to delete these clones') -cne 'TERMINATE') { Write-Note 'cancelled'; break }
     Invoke-Aws ec2 terminate-instances --instance-ids @($clones.Id) | Out-Null
     Invoke-Aws ec2 wait instance-terminated --instance-ids @($clones.Id) | Out-Null

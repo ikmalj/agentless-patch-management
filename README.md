@@ -71,7 +71,7 @@ Region `ap-southeast-5` (Asia Pacific, Malaysia). All resources are tagged `proj
 | `test-rhel.ps1`, `test-win.ps1` | Read-only precheck and scan, calling the Lambdas directly |
 | `run-cycle.ps1` | Starts one patch cycle (`-Mode scan` or `-Mode patch`) and follows it to the end |
 | `restore-baseline.ps1` | Returns hosts to their unpatched baseline AMI (EC2 replace root volume) |
-| `exp3-scale.ps1` | Experiment 3 (scalability): launch clones, run levels from baseline, teardown |
+| `exp3-scale.ps1` | Experiment 3 (scalability): launch clones, run levels from baseline (RHEL, Windows or mixed), teardown |
 | `evidence/` | Results of every test, cycle, restore and deploy (JSON, CSV) |
 | `site/` | Project website: landing page and results dashboard built from `evidence/` (see [Project Website](#project-website)) |
 | `build/` | Generated files (not in the repository) |
@@ -170,6 +170,16 @@ and a RHEL run takes about 4 minutes against about 25 for Windows. Each level st
 
 Windows add-on (1 vs 2 hosts): stop the RHEL hosts, start win-01, then use `-Platform windows -Total 2`
 and `-Levels 1,2`. Teardown removes only clones tagged `Experiment=exp3`, never the testbed hosts.
+
+Mixed series (both platforms, testbed ratio of two RHEL hosts to one Windows host): level 3 is the testbed
+(rhel-01, rhel-02, win-01) and level 6 doubles it with clones rhel-03, rhel-04 and win-02 (12 of 16 vCPUs).
+
+```powershell
+.\lab.ps1 endpoint-up ; .\lab.ps1 start-all
+.\exp3-scale.ps1 -Action launch -Platform mixed                      # rhel-03, rhel-04, win-02
+.\exp3-scale.ps1 -Action run    -Platform mixed                      # levels 3 and 6, type SCALE
+.\exp3-scale.ps1 -Action teardown                                     # type TERMINATE
+```
 
 ### Experiment 4: Operational Cost
 
