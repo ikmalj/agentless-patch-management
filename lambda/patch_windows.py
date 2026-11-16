@@ -255,6 +255,17 @@ try { $m = Get-MpComputerStatus; $mp = [ordered]@{ platform = $m.AMProductVersio
 [ordered]@{ found = @($found); defender = $mp } | ConvertTo-Json -Compress -Depth 4
 """
 
+# Installed updates (KB, kind, date), newest first. Get-HotFix reads the servicing stack's own list,
+# so it needs no Windows Update session and works over WinRM.
+INSTALLED_PS = r"""
+$h = @(Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 400 | ForEach-Object {
+  $on = ''
+  try { if ($_.InstalledOn) { $on = ([datetime]$_.InstalledOn).ToString('yyyy-MM-dd') } } catch { }
+  [ordered]@{ kb = [string]$_.HotFixID; kind = [string]$_.Description; on = $on }
+})
+[ordered]@{ installed = $h } | ConvertTo-Json -Compress -Depth 4
+"""
+
 # Runs as SYSTEM through a one-shot scheduled task. Writes progress to <run>.status.json.
 WORKER_PS = r"""param([string]$RunId, [string]$Mode = 'install', [double]$Percent = 100, [string]$Kbs = '')
 $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
@@ -446,6 +457,36 @@ def act_precheck(sess, ev):
             "reboot_pending": f.get("reboot_pending"), "health": health}
 
 
+def _log_update_lines(sess, host, scan_ts, countable):
+    """The update list for the dashboard and the website, one log line per update. Never raises.
+
+    Columns as on RHEL (id, severity, package) plus the state: "available" KBs come from the Windows
+    Update search (package = the update's title), "installed" KBs from Get-HotFix (severity = its
+    kind, such as Security Update; package = the install date). A closing "update_scan" line carries
+    the counts. Logs only: nothing here goes into the scan result or the state machine.
+    """
+    try:
+        installed, error = [], None
+        try:
+            d = _ps(sess, INSTALLED_PS)
+            got = d.get("installed") or []
+            installed = [got] if isinstance(got, dict) else list(got)   # one hotfix serialises as an object
+        except Exception as e:
+            error = f"{type(e).__name__}: {str(e)[:200]}"
+        base = {"record": "update", "host": host, "platform": "windows", "unit": "KB", "scan_ts": scan_ts}
+        for u in countable:
+            print(json.dumps({**base, "state": "available", "id": u.get("kb"),
+                              "severity": u.get("severity") or "Unspecified", "package": (u.get("title") or "")[:160]}))
+        for h in installed:
+            print(json.dumps({**base, "state": "installed", "id": h.get("kb"), "severity": h.get("kind") or "Update",
+                              "package": f"installed {h['on']}" if h.get("on") else "installed"}))
+        print(json.dumps({"record": "update_scan", "host": host, "platform": "windows", "unit": "KB",
+                          "scan_ts": scan_ts, "available": len(countable), "installed": len(installed),
+                          "truncated": False, **({"installed_error": error} if error else {})}))
+    except Exception as e:      # the list is extra detail: it must never fail a scan
+        print(json.dumps({"update_list_warning": f"{type(e).__name__}: {str(e)[:200]}"}))
+
+
 def act_scan(sess, ev):
     t = time.time()
     found, defender, method = _search(sess)
@@ -455,6 +496,8 @@ def act_scan(sess, ev):
     check = [check] if isinstance(check, str) else [a for a in check if isinstance(a, str)]
     still = sorted(set(check) & set(ids))
     print(json.dumps({"scan_found": found, "defender_versions": defender}))
+    host = ev.get("host") if isinstance(ev.get("host"), dict) else {"ip": ev.get("host")}
+    _log_update_lines(sess, host.get("name") or host.get("ip") or "", int(t), countable)
     return {"advisories": len(countable), "by_severity": by_sev,
             "updates_available": bool(countable),
             "pending_security_packages": len(countable), "pending_packages": len(found),

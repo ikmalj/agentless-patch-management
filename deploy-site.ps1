@@ -264,7 +264,7 @@ $keys = foreach ($f in $local) {
 }
 # Remove objects that are no longer in site\. The publisher Lambda's files are not in site\: keep them.
 # data/evaluation.json (Evaluation view) is kept only while $SiteFrom is set; otherwise an old copy is removed.
-$publisherFiles = @('data/live.json') + $(if ($From) { @('data/evaluation.json') } else { @() })
+$publisherFiles = @('data/live.json', 'data/updates.json') + $(if ($From) { @('data/evaluation.json') } else { @() })
 $remote = @((Invoke-Aws s3api list-objects-v2 --bucket $SiteBucket).Contents | ForEach-Object Key)
 foreach ($old in ($remote | Where-Object { $_ -and $_ -notin $keys -and $_ -notin $publisherFiles })) {
     Invoke-Aws s3 rm "s3://$SiteBucket/$old" --only-show-errors | Out-Null
@@ -294,8 +294,8 @@ if (Test-Aws iam get-role --role-name $SitePublisherRole) {
     Write-Ok "$SitePublisherRole created"
     $pubRoleNew = $true
 }
-# Least privilege: query the metrics log group, read metric counts, see this state machine's runs,
-# write its two files, clear the site cache.
+# Least privilege: query the metrics log group (and the update lists in the two patch Lambdas' log
+# groups), read metric counts, see this state machine's runs, write its three files, clear the site cache.
 Save-Json ([ordered]@{
     Version   = '2012-10-17'
     Statement = @(
@@ -303,19 +303,23 @@ Save-Json ([ordered]@{
                     Resource = "arn:aws:logs:${Region}:${Account}:log-group:${pubLogGroup}:*" }
         [ordered]@{ Sid = 'QueryMetricsRecordsOnly'; Effect = 'Allow'; Action = 'logs:StartQuery'
                     Resource = "arn:aws:logs:${Region}:${Account}:log-group:$MetricsLogGroup" }
+        [ordered]@{ Sid = 'QueryUpdateLists'; Effect = 'Allow'; Action = 'logs:StartQuery'
+                    Resource = @("arn:aws:logs:${Region}:${Account}:log-group:/aws/lambda/$RhelFn",
+                                 "arn:aws:logs:${Region}:${Account}:log-group:/aws/lambda/$WinFn") }
         [ordered]@{ Sid = 'ReadQueryResults'; Effect = 'Allow'; Action = @('logs:GetQueryResults', 'logs:StopQuery'); Resource = '*' }
         [ordered]@{ Sid = 'SeeRunningCycles'; Effect = 'Allow'; Action = 'states:ListExecutions'; Resource = $StateMachineArn }
         [ordered]@{ Sid = 'ReadRunMode'; Effect = 'Allow'; Action = 'states:DescribeExecution'
                     Resource = "arn:aws:states:${Region}:${Account}:execution:${StateMachineName}:*" }
         [ordered]@{ Sid = 'ReadMetricCounts'; Effect = 'Allow'; Action = 'cloudwatch:GetMetricData'; Resource = '*' }
         [ordered]@{ Sid = 'WriteDashboardDataOnly'; Effect = 'Allow'; Action = 's3:PutObject'
-                    Resource = @("arn:aws:s3:::$SiteBucket/data/live.json", "arn:aws:s3:::$SiteBucket/data/evaluation.json") }
+                    Resource = @("arn:aws:s3:::$SiteBucket/data/live.json", "arn:aws:s3:::$SiteBucket/data/evaluation.json",
+                                 "arn:aws:s3:::$SiteBucket/data/updates.json") }
         [ordered]@{ Sid = 'ClearSiteCache'; Effect = 'Allow'; Action = 'cloudfront:CreateInvalidation'; Resource = $distArn }
     )
 }) (Join-Path $BuildDir 'site-publisher-policy.json') -Depth 10
 Invoke-Aws iam put-role-policy --role-name $SitePublisherRole --policy-name 'publish-live-site-data' `
     --policy-document 'file://build/site-publisher-policy.json' | Out-Null
-Write-Ok 'inline policy publish-live-site-data set (metrics log query, metric counts, list/describe runs, put data/*.json, invalidate)'
+Write-Ok 'inline policy publish-live-site-data set (metrics and update-list log queries, metric counts, list/describe runs, put data/*.json, invalidate)'
 
 $plg = @((Invoke-Aws logs describe-log-groups --log-group-name-prefix $pubLogGroup).logGroups | Where-Object logGroupName -eq $pubLogGroup)
 if (-not $plg) { Invoke-Aws logs create-log-group --log-group-name $pubLogGroup --tags 'project=serverless-patch' | Out-Null }

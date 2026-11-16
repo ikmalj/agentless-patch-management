@@ -4,6 +4,7 @@
      Live        data/live.json        the last 2 weeks, written by serverless-patch-site-publisher when
                                      a cycle starts or ends; re-checked every 60 s while the page is open
      Evaluation  data/evaluation.json  same, for every run since the evaluation began (no end date)
+     Updates     data/updates.json     each host's security updates at its latest scan, line by line
                window.PATCH_DATA     fallback built from evidence/ (no cost, no orchestration counts),
                                      shown when the page is opened from disk or nothing is published yet
 
@@ -32,21 +33,23 @@
     { id: 'hostGauge', x: 0, y: 14, w: 5, h: 6, title: 'Selected host {host}: success rate' },
     { id: 'hostTime', x: 5, y: 14, w: 9, h: 6, title: 'Selected host {host}: deployment time per run (s)', scale: true },
     { id: 'hostHistory', x: 14, y: 14, w: 10, h: 6, title: 'Selected host {host}: run history', table: true },
-    { id: 'barHost', x: 0, y: 20, w: 8, h: 7, title: 'Patch Deployment Time per Host (Experiment 1, longest run in range, s)', scale: true },
-    { id: 'timeAll', x: 8, y: 20, w: 16, h: 7, title: 'Deployment Time per Run (each point is one host in one patch run, s)', scale: true },
-    { id: 'exp3', x: 0, y: 27, w: 12, h: 7, title: 'Scalability Across Multiple Hosts (Experiment 3, RHEL full-scope runs, x = hosts in run)' },
-    { id: 'orch', x: 12, y: 27, w: 12, h: 7, title: 'Orchestration Layer (Step Functions, Lambda, SNS)' },
-    { id: 'perDay', x: 0, y: 34, w: 12, h: 6, title: 'Step Functions Executions per Day' },
-    { id: 'platform', x: 12, y: 34, w: 12, h: 6, title: 'Success Rate by Platform (from CloudWatch Logs)', table: true },
-    { id: 'costSv', x: 0, y: 40, w: 6, h: 6, title: 'Estimated Operational Cost (Experiment 4, USD)' },
-    { id: 'costTable', x: 6, y: 40, w: 18, h: 6, title: 'Cost per Cycle (list price before free tier)', table: true },
-    { id: 'latest', x: 0, y: 46, w: 24, h: 7, title: 'Latest Host Results (scan and patch runs)', table: true },
-    { id: 'footer', x: 0, y: 53, w: 24, h: 3, type: 'text', plain: true },   // one row more than CloudWatch: the site's note is longer
+    { id: 'updates', x: 0, y: 20, w: 24, h: 8, title: 'Selected host {host}: security updates (latest scan first)', table: true },
+    { id: 'barHost', x: 0, y: 28, w: 8, h: 7, title: 'Patch Deployment Time per Host (Experiment 1, longest run in range, s)', scale: true },
+    { id: 'timeAll', x: 8, y: 28, w: 16, h: 7, title: 'Deployment Time per Run (each point is one host in one patch run, s)', scale: true },
+    { id: 'exp3', x: 0, y: 35, w: 12, h: 7, title: 'Scalability Across Multiple Hosts (Experiment 3, RHEL full-scope runs, x = hosts in run)' },
+    { id: 'orch', x: 12, y: 35, w: 12, h: 7, title: 'Orchestration Layer (Step Functions, Lambda, SNS)' },
+    { id: 'perDay', x: 0, y: 42, w: 12, h: 6, title: 'Step Functions Executions per Day' },
+    { id: 'platform', x: 12, y: 42, w: 12, h: 6, title: 'Success Rate by Platform (from CloudWatch Logs)', table: true },
+    { id: 'costSv', x: 0, y: 48, w: 6, h: 6, title: 'Estimated Operational Cost (Experiment 4, USD)' },
+    { id: 'costTable', x: 6, y: 48, w: 18, h: 6, title: 'Cost per Cycle (list price before free tier)', table: true },
+    { id: 'latest', x: 0, y: 54, w: 24, h: 7, title: 'Latest Host Results (scan and patch runs)', table: true },
+    { id: 'footer', x: 0, y: 61, w: 24, h: 3, type: 'text', plain: true },   // one row more than CloudWatch: the site's note is longer
   ];
 
   var state = {
     view: null, data: null, host: null,
     live: null, liveText: '', all: null, allText: '', chose: false,
+    updates: null, updatesText: '',
     redrawTimer: null,
   };
 
@@ -313,6 +316,31 @@
       'Live shows the last 2 weeks; Evaluation shows every run since the evaluation began.'));
     md.appendChild(p); body.appendChild(md);
   };
+  // The selected host's security updates at its latest scan, in the three columns of
+  // `dnf updateinfo list` (advisory, severity, package) plus the state. data/updates.json comes from
+  // the patch Lambdas' logs; the CloudWatch widget reads the same log lines, 1,000 at a time.
+  var UPDATE_COLS = ['id', 'severity', 'package', 'state'], UPDATE_ROWS = 1000;
+  W.updates = function (body) {
+    var all = state.updates && state.updates.hosts, u = all && all[state.host];
+    if (!u) {
+      note(body, fromDisk ? 'The update list is read from the patch Lambdas\u2019 logs, so it appears on the published site only.'
+        : all ? 'No update list recorded for this host yet. It appears after the next scan or patch cycle.'
+        : 'The update list appears after the next scan or patch cycle.');
+      return;
+    }
+    var rows = u.rows || [], when = dayTime(Date.parse(u.scan_at)) + ' MYT';
+    if (!rows.length) {
+      note(body, u.installed_error ? 'The latest scan (' + when + ') found no available security updates, and the installed list could not be read.'
+        : 'The latest scan (' + when + ') listed no security updates for this host.');
+      return;
+    }
+    var total = num(u.available) + num(u.installed), shown = Math.min(rows.length, UPDATE_ROWS);
+    body.appendChild(el('p', 'cw-foot cw-tfoot', 'Latest scan ' + when + ': ' + num(u.available).toLocaleString('en') + ' available, ' +
+      num(u.installed).toLocaleString('en') + ' installed.' +
+      (total > shown ? ' Showing the first ' + shown.toLocaleString('en') + ' of ' + total.toLocaleString('en') + ' lines.' : '') +
+      (u.installed_error ? ' The installed list could not be read at this scan.' : '')));
+    table(body, UPDATE_COLS, rows.slice(0, UPDATE_ROWS));
+  };
   function custom(name) {
     return function (body) {
       var panels = (state.data.panels || {})[isDark() ? 'dark' : 'light'] || {};
@@ -566,13 +594,18 @@
   select.addEventListener('change', function () {
     state.host = select.value;
     setUrl();
-    ['hostGauge', 'hostTime', 'hostHistory'].forEach(function (id) {
-      var w = grid.querySelector('[data-widget="' + id + '"]'); if (!w) return;
-      var spec = LAYOUT.filter(function (s) { return s.id === id; })[0];
-      w.querySelector('h3').textContent = title(spec); w.setAttribute('aria-label', title(spec));
-      var body = w.querySelector('.cw-wb'); body.replaceChildren(); W[id](body);
-    });
+    ['hostGauge', 'hostTime', 'hostHistory', 'updates'].forEach(redrawWidget);
   });
+  // Draw one widget again in place (new host, or its own data arrived).
+  function redrawWidget(id) {
+    var w = grid.querySelector('[data-widget="' + id + '"]'); if (!w) return;
+    var spec = LAYOUT.filter(function (s) { return s.id === id; })[0];
+    w.querySelector('h3').textContent = title(spec); w.setAttribute('aria-label', title(spec));
+    var body = w.querySelector('.cw-wb'); body.replaceChildren();
+    try { W[id](body); } catch (e) { body.replaceChildren(); note(body, 'This widget could not be drawn.'); if (window.console) console.error(id, e); }
+    body.scrollLeft = 0; body.scrollTop = 0;
+    body.dispatchEvent(new Event('scroll'));      // refreshes the More columns button
+  }
 
   // ------------------------------------------------------------ status line
   // One status sentence for a data set: {cls, text}. Used by the dashboard and by the line under
@@ -667,10 +700,26 @@
       if (state.view === 'all' && (changed || state.data !== state.all)) show(x.d); else drawStatus();
     }).catch(function () { /* keep what is shown */ });
   }
+  // The per-host update list. Fetched with the live data and again whenever that changes; it only
+  // redraws its own widget.
+  function loadUpdates() {
+    if (fromDisk) return;
+    fetch('data/updates.json?t=' + Date.now(), { cache: 'no-store' }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    }).then(function (text) {
+      if (text === state.updatesText) return;
+      var d = JSON.parse(text);
+      if (!d || typeof d.hosts !== 'object') return;
+      state.updates = d; state.updatesText = text;
+      redrawWidget('updates');
+    }).catch(function () { /* the widget keeps its note */ });
+  }
   function loadLive() {
     return getJson('data/live.json').then(function (x) {
       var changed = x.text !== state.liveText;
       if (changed) { state.live = x.d; state.liveText = x.text; }
+      if (changed || !state.updates) loadUpdates();
       btnLive.title = '';
       if (state.view !== 'live') { drawStatus(); return; }
       // Nothing in the last 2 weeks and the visitor has not picked a view: open Evaluation, so the

@@ -195,9 +195,22 @@
    }
   },
   {
-   "type": "metric",
+   "type": "log",
    "x": 0,
    "y": 23,
+   "width": 24,
+   "height": 8,
+   "properties": {
+    "title": "Selected host __DEFAULT_HOST__: security updates (latest scan first)",
+    "region": "__REGION__",
+    "view": "table",
+    "query": "SOURCE '/aws/lambda/__RHEL_FN__' | SOURCE '/aws/lambda/__WIN_FN__' | filter record = 'update' and host = '__DEFAULT_HOST__' | sort scan_ts desc, state asc, id desc | fields id, severity, package, state | limit 1000"
+   }
+  },
+  {
+   "type": "metric",
+   "x": 0,
+   "y": 31,
    "width": 8,
    "height": 7,
    "properties": {
@@ -237,7 +250,7 @@
   {
    "type": "metric",
    "x": 8,
-   "y": 23,
+   "y": 31,
    "width": 16,
    "height": 7,
    "properties": {
@@ -293,7 +306,7 @@
   {
    "type": "log",
    "x": 0,
-   "y": 30,
+   "y": 38,
    "width": 12,
    "height": 7,
    "properties": {
@@ -306,7 +319,7 @@
   {
    "type": "metric",
    "x": 12,
-   "y": 30,
+   "y": 38,
    "width": 12,
    "height": 7,
    "properties": {
@@ -436,7 +449,7 @@
   {
    "type": "metric",
    "x": 0,
-   "y": 37,
+   "y": 45,
    "width": 12,
    "height": 6,
    "properties": {
@@ -482,7 +495,7 @@
   {
    "type": "log",
    "x": 12,
-   "y": 37,
+   "y": 45,
    "width": 12,
    "height": 6,
    "properties": {
@@ -495,7 +508,7 @@
   {
    "type": "metric",
    "x": 0,
-   "y": 43,
+   "y": 51,
    "width": 6,
    "height": 6,
    "properties": {
@@ -532,7 +545,7 @@
   {
    "type": "log",
    "x": 6,
-   "y": 43,
+   "y": 51,
    "width": 18,
    "height": 6,
    "properties": {
@@ -545,7 +558,7 @@
   {
    "type": "log",
    "x": 0,
-   "y": 49,
+   "y": 57,
    "width": 24,
    "height": 7,
    "properties": {
@@ -558,7 +571,7 @@
   {
    "type": "text",
    "x": 0,
-   "y": 56,
+   "y": 64,
    "width": 24,
    "height": 2,
    "properties": {

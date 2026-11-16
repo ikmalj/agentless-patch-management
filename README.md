@@ -57,8 +57,8 @@ Region `ap-southeast-5` (Asia Pacific, Malaysia). All resources are tagged `proj
 | Path | Purpose |
 |---|---|
 | `config.ps1` | Shared settings (account, VPC, hosts, baseline AMIs, resource names) and helper functions. Dot-sourced by every script. |
-| `lambda/patch_rhel.py` | RHEL actions over SSH: precheck, scan, install_start, install_status, reboot, health |
-| `lambda/patch_windows.py` | Windows actions over WinRM: same six actions; installs through a one-shot SYSTEM scheduled task |
+| `lambda/patch_rhel.py` | RHEL actions over SSH: precheck, scan, install_start, install_status, reboot, health. Every scan also logs the update list line by line (`dnf updateinfo list --security`, available and `--installed`) |
+| `lambda/patch_windows.py` | Windows actions over WinRM: same six actions; installs through a one-shot SYSTEM scheduled task. Every scan also logs the available KBs and the installed ones (`Get-HotFix`) |
 | `lambda/metrics.py` | `serverless-patch-metrics`: per-host and per-cycle records (EMF metrics), cost estimate, email text |
 | `lambda/summary_widget.py` | `serverless-patch-summary-widget`: CloudWatch custom widget (coloured Patch Summary panels) |
 | `statemachine/patch-cycle.asl.json` | Step Functions workflow `serverless-patch-cycle` (JSONata, parallel Map over hosts) |
@@ -225,6 +225,15 @@ neither has an end date, so nothing needs changing as more cycles run:
 When the last 2 weeks hold no patch cycle, the page opens on Evaluation instead of an empty Live view
 (Live stays one click away).
 
+**Security updates per host.** The "Selected host: security updates" table lists the host's updates at
+its latest scan in the three columns of `dnf updateinfo list` (advisory, severity, package build) plus
+the state, `available` or `installed`; for Windows the rows are KBs. Each scan step logs these lines to
+its own Lambda log group (`record = "update"`, closed by one `update_scan` line with the counts), so
+nothing extra passes through the state machine. The CloudWatch widget queries those log groups
+directly (newest scan first, 1,000 lines); the publisher writes the latest scan of each host to
+`data/updates.json` for the website. The list appears after the first scan or patch cycle that runs
+with the updated patch Lambdas (`.\deploy-framework.ps1`).
+
 | File | Purpose |
 |---|---|
 | `site/index.html` | The page |
@@ -234,7 +243,7 @@ When the last 2 weeks hold no patch cycle, the page opens on Evaluation instead 
 | `site-src/build_arch_diagram.py` | Writes the architecture diagram (inline SVG) into `site/index.html`; edit and re-run to change it |
 | `site/data/patch-data.js` | Fallback data from `evidence\` (same evidence always gives the same file) |
 | `site/build_site_data.py` | Builds that fallback: evidence reports (`cycle-*.json` and the Experiment 3 runs `exp3-*-n*.json`) -> metrics records (`lambda/metrics.py`) -> the publisher's format |
-| `lambda/site_publisher.py` | Lambda `serverless-patch-site-publisher`: writes `data/live.json` and `data/evaluation.json` |
+| `lambda/site_publisher.py` | Lambda `serverless-patch-site-publisher`: writes `data/live.json`, `data/evaluation.json` and `data/updates.json` |
 
 To look at the page locally (opened from disk, Evaluation shows the evidence files; Live needs the published site):
 
@@ -286,7 +295,8 @@ serverless-patch-cycle starts / finishes
         renders the Patch Summary panels with summary_widget.py (light and dark)
         reads Step Functions / Lambda / SNS counts (GetMetricData) for the Orchestration widgets
         asks Step Functions which executions are running
-        writes data/live.json and data/evaluation.json, clears both in CloudFront
+        reads each host's update list from the patch Lambdas' log groups
+        writes data/live.json, data/evaluation.json and data/updates.json, clears them in CloudFront
    -> open pages re-check data/live.json every 60 s
 
 every day at 00:05 MYT

@@ -6,6 +6,9 @@ same data the dashboard reads and writes it as JSON the website draws:
   data/live.json        last LIVE_DAYS days, plus "patch cycle in progress" status
   data/evaluation.json  the website's Evaluation view: every run since EVAL_FROM (Malaysia time),
                         up to now, or up to EVAL_TO if a last day is set; written only if EVAL_FROM is set
+  data/updates.json     the security updates of each host at its latest scan, line by line as
+                        `dnf updateinfo list` prints them (advisory or KB, severity, package, and
+                        whether it is installed or still available), read from the patch Lambdas' logs
 
 Each file holds:
   records   serverless-patch-metrics host and cycle records (scan and patch), newest first, with
@@ -176,6 +179,97 @@ def fetch_records(start, end, logs):
     return out
 
 
+# ------------------------------------------------------------------ update list (per host)
+UPDATE_ROWS_MAX = 4000      # rows per host in data/updates.json
+_SEV_ORDER = {"Critical": 0, "Important": 1, "Moderate": 2, "Low": 3}
+_HOST_OK = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
+
+
+def _insights(logs, group, start, end, query):
+    """Run one Logs Insights query on one log group; return the parsed JSON messages."""
+    qid = logs.start_query(logGroupName=group, startTime=int(start.timestamp()),
+                           endTime=int(end.timestamp()), queryString=query, limit=10000)["queryId"]
+    deadline = time.time() + 45
+    while True:
+        r = logs.get_query_results(queryId=qid)
+        if r["status"] in ("Complete", "Failed", "Cancelled", "Timeout", "Unknown"):
+            break
+        if time.time() > deadline:
+            try:
+                logs.stop_query(queryId=qid)
+            except Exception:  # noqa: BLE001 (best effort)
+                pass
+            raise TimeoutError("Logs Insights query took longer than 45 s")
+        time.sleep(0.5)
+    if r["status"] != "Complete":
+        raise RuntimeError(f"Logs Insights query {r['status']}")
+    out = []
+    for row in r.get("results", []):
+        f = {c["field"]: c.get("value") for c in row}
+        try:
+            rec = json.loads(f.get("@message") or "")
+        except ValueError:
+            continue
+        if isinstance(rec, dict):
+            out.append(rec)
+    return out
+
+
+def fetch_updates(start, end, logs, groups=None):
+    """{host: {...}} with each host's update list at its latest scan, from the patch Lambdas' logs.
+
+    Every scan logs one "update" line per update and a closing "update_scan" line (patch_rhel.py,
+    patch_windows.py). The newest update_scan of a host names the scan to show; its lines become
+    rows of [id, severity, package, state]: still-available updates first (highest severity first),
+    then the installed ones (newest advisory first).
+    """
+    groups = groups or [f"/aws/lambda/{f}" for f in FUNCTIONS[:2]]
+    hosts, errors = {}, []
+    for group in groups:
+        try:
+            _updates_from(group, start, end, logs, hosts)
+        except Exception as e:  # noqa: BLE001 (one platform's log group failing keeps the other's list)
+            errors.append(f"{group}: {type(e).__name__}: {str(e)[:160]}")
+    if errors and len(errors) == len(groups):
+        raise RuntimeError("; ".join(errors))
+    return hosts
+
+
+def _updates_from(group, start, end, logs, hosts):
+    scans = _insights(logs, group, start, end,
+                      "fields @message | filter record = 'update_scan' | sort @timestamp desc | limit 2000")
+    latest = {}
+    for s in scans:
+        h = s.get("host")
+        if isinstance(h, str) and _HOST_OK.match(h) and isinstance(s.get("scan_ts"), int):
+            if h not in latest or s["scan_ts"] > latest[h]["scan_ts"]:
+                latest[h] = s
+    for h, s in latest.items():
+        lines = _insights(logs, group, start, end,
+                          f"fields @message | filter record = 'update' and host = '{h}' "
+                          f"and scan_ts = {s['scan_ts']} | limit 10000")
+        seen, avail, inst = set(), [], []
+        for u in lines:
+            # Package builds are not masked: a version such as 17.0.11.0 would be mistaken for an address.
+            row = (str(u.get("id") or "")[:60], str(u.get("severity") or "")[:40], str(u.get("package") or "")[:180])
+            state = "available" if u.get("state") == "available" else "installed"
+            if not row[0] or (row, state) in seen:
+                continue
+            seen.add((row, state))
+            (avail if state == "available" else inst).append(list(row) + [state])
+        avail.sort(key=lambda r: (_SEV_ORDER.get(r[1], 9), r[0], r[2]))
+        inst.sort(key=lambda r: (r[0], r[2]), reverse=True)
+        rows = avail + inst
+        hosts[h] = {
+            "platform": s.get("platform"), "unit": s.get("unit"),
+            "scan_at": datetime.fromtimestamp(s["scan_ts"], timezone.utc).isoformat(timespec="seconds"),
+            "available": len(avail), "installed": len(inst),
+            "truncated": bool(s.get("truncated")) or len(lines) >= 10000 or len(rows) > UPDATE_ROWS_MAX,
+            "installed_error": bool(s.get("installed_error")),
+            "rows": rows[:UPDATE_ROWS_MAX],
+        }
+
+
 def fetch_metrics(start, end, cw, now):
     """Counts for the Orchestration Layer widget and Step Functions Executions per Day."""
     specs = [("executions", "AWS/States", "ExecutionsStarted", "StateMachineArn", STATE_MACHINE_ARN),
@@ -289,6 +383,21 @@ def lambda_handler(event, context=None, logs=None, sfn=None, s3=None, cloudfront
                                    metrics=fetch_metrics(e_start, e_end, cw, now), now=now)
         written["data/evaluation.json"] = put_json(s3, "data/evaluation.json", evaluation)
 
+    # The per-host update list. Extra detail: a failure here (for example the permission not
+    # deployed yet) must not stop the dashboard data above from being published.
+    updates_note = None
+    if exec_status != "RUNNING":
+        try:
+            if exec_status and not waited:
+                time.sleep(15)       # a short scan run: let its last log lines become searchable
+            u_start = min(start, ev[0]) if ev else start
+            u_hosts = fetch_updates(u_start, datetime.now(timezone.utc), logs)
+            written["data/updates.json"] = put_json(s3, "data/updates.json", {
+                "generated_at": now.isoformat(timespec="seconds"), "hosts": u_hosts})
+            updates_note = {h: [v["available"], v["installed"]] for h, v in u_hosts.items()}
+        except Exception as e:  # noqa: BLE001
+            updates_note = f"skipped: {type(e).__name__}: {str(e)[:200]}"
+
     inv = None
     if DISTRIBUTION_ID:
         paths = ["/" + k for k in written]
@@ -299,6 +408,6 @@ def lambda_handler(event, context=None, logs=None, sfn=None, s3=None, cloudfront
     result = {"written": written, "records": len(live["records"]),
               "patch_cycles": sum(1 for r in live["records"] if r.get("record") == "cycle" and r.get("mode") == "patch"),
               "status": (live["status"] or {}).get("state"), "trigger": exec_status or (event or {}).get("source") or "manual",
-              "execution": exec_name, "waited_s": waited, "invalidation": inv}
+              "execution": exec_name, "waited_s": waited, "updates": updates_note, "invalidation": inv}
     print(json.dumps(result))
     return result

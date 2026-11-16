@@ -213,27 +213,71 @@ SEVERITIES = ("Critical", "Important", "Moderate", "Low")
 SEV_RANK = {"Critical": 0, "Important": 1, "Moderate": 2, "Low": 3}
 
 
-def _security_advisories(c, flags=""):
-    """Return ({advisory_id: severity}, {package names in those advisories}, unparsed_lines).
-
-    The package names are what the install step will touch: each advisory line names
-    the fixed package build, e.g. openssl-1:3.0.7-16.el9_2.x86_64 -> openssl.
-    """
-    rc, out, err = _run(c, f"sudo -n dnf -q {flags}updateinfo list --security", 240)
-    if rc != 0:
-        raise CommandFailed(f"dnf updateinfo exit {rc}: {err.strip()[-500:]}")
-    advisories, names, unparsed = {}, set(), 0
+def _advisory_lines(out):
+    """Parse `dnf updateinfo list` output: [(advisory_id, severity, package build)], unparsed line count."""
+    rows, unparsed = [], 0
     for line in out.splitlines():
         line = line.strip()
         if not line:
             continue
         m = ADVISORY_RE.match(line)
         if m:
-            advisories.setdefault(m.group(1), m.group(2))
-            names.add(m.group(3).rsplit("-", 2)[0])
+            rows.append(m.groups())
         else:
             unparsed += 1
+    return rows, unparsed
+
+
+def _security_advisories(c, flags="", lines=None):
+    """Return ({advisory_id: severity}, {package names in those advisories}, unparsed_lines).
+
+    The package names are what the install step will touch: each advisory line names
+    the fixed package build, e.g. openssl-1:3.0.7-16.el9_2.x86_64 -> openssl.
+    If `lines` is a list, the parsed (advisory, severity, package build) lines are added to it.
+    """
+    rc, out, err = _run(c, f"sudo -n dnf -q {flags}updateinfo list --security", 240)
+    if rc != 0:
+        raise CommandFailed(f"dnf updateinfo exit {rc}: {err.strip()[-500:]}")
+    rows, unparsed = _advisory_lines(out)
+    advisories, names = {}, set()
+    for adv, sev, pkg in rows:
+        advisories.setdefault(adv, sev)
+        names.add(pkg.rsplit("-", 2)[0])
+    if lines is not None:
+        lines.extend(rows)
     return advisories, names, unparsed
+
+
+UPDATE_LINES_MAX = 6000     # per scan and state; a full RHEL 9 host lists about 1,500
+
+
+def _log_update_lines(host, scan_ts, available, installed, installed_error=None):
+    """The update list for the dashboard and the website, one log line per update.
+
+    Same three columns as `dnf updateinfo list` (advisory, severity, package build) plus the state:
+    "available" (not installed yet) or "installed". A closing "update_scan" line carries the counts,
+    so a reader can tell which lines belong to the latest scan of a host. Logs only: nothing here
+    goes into the scan result or the state machine.
+    """
+    for state, rows in (("available", available), ("installed", installed)):
+        for adv, sev, pkg in rows[:UPDATE_LINES_MAX]:
+            print(json.dumps({"record": "update", "host": host, "platform": "rhel", "unit": "RHSA",
+                              "scan_ts": scan_ts, "state": state, "id": adv, "severity": sev, "package": pkg}))
+    print(json.dumps({"record": "update_scan", "host": host, "platform": "rhel", "unit": "RHSA",
+                      "scan_ts": scan_ts, "available": len(available), "installed": len(installed),
+                      "truncated": max(len(available), len(installed)) > UPDATE_LINES_MAX,
+                      **({"installed_error": installed_error} if installed_error else {})}))
+
+
+def _installed_advisories(c):
+    """`dnf updateinfo list --security --installed`: (lines, error text or None). Never raises."""
+    try:
+        rc, out, err = _run(c, "sudo -n dnf -q -C updateinfo list --security --installed", 60)
+        if rc != 0:
+            return [], f"dnf updateinfo --installed exit {rc}: {err.strip()[-200:]}"
+        return _advisory_lines(out)[0], None
+    except Exception as e:      # the list is extra detail: it must never fail a scan
+        return [], f"{type(e).__name__}: {str(e)[:200]}"
 
 
 def _select(advisories, percent):
@@ -248,7 +292,8 @@ def act_scan(c, ev):
     refresh = "--refresh " if ev.get("refresh") else ""
 
     # 1. Security advisories (the RHEL counting unit for Experiment 2).
-    advisories, sec_pkgs, unparsed = _security_advisories(c, refresh)
+    available = []
+    advisories, sec_pkgs, unparsed = _security_advisories(c, refresh, available)
     by_sev = {s: 0 for s in SEVERITIES}
     for sev in advisories.values():
         key = sev if sev in by_sev else "Unknown"
@@ -276,6 +321,14 @@ def act_scan(c, ev):
     # Full lists go to CloudWatch Logs as evidence; the state machine keeps counts only.
     print(json.dumps({"scan_advisory_ids": sorted(advisories),
                       "scan_security_packages": sorted(sec_pkgs)}))
+    # The same list line by line, with what is already installed, for the "security updates" table.
+    try:
+        # Skipped if the scan itself was slow, to stay well inside the Lambda's 300 s.
+        installed, installed_error = _installed_advisories(c) if time.time() - t < 200 else ([], "skipped: slow scan")
+        host = _host(ev)
+        _log_update_lines(host.get("name") or host["ip"], int(t), available, installed, installed_error)
+    except Exception as e:      # never fail the scan over the detail list
+        print(json.dumps({"update_list_warning": f"{type(e).__name__}: {str(e)[:200]}"}))
     return {"advisories": len(advisories), "by_severity": by_sev,
             "updates_available": rc_cu == 100,
             "pending_security_packages": len(sec_pkgs),
