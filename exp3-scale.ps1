@@ -21,10 +21,11 @@
   .\exp3-scale.ps1 -Action run    -Platform windows -Levels 1,2
   .\exp3-scale.ps1 -Action launch -Platform mixed -Total 6         # adds rhel-03, rhel-04, win-02 (12 of 16 vCPUs)
   .\exp3-scale.ps1 -Action run    -Platform mixed -Levels 3,6
+  .\exp3-scale.ps1 -Action collect -Platform mixed                 # after an interrupted run: save results, write the summary
   .\exp3-scale.ps1 -Action teardown                                # terminates every Experiment=exp3 clone
 #>
 param(
-    [Parameter(Mandatory)][ValidateSet('status', 'launch', 'run', 'teardown')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('status', 'launch', 'run', 'collect', 'teardown')][string]$Action,
     [ValidateSet('rhel', 'windows', 'mixed')][string]$Platform = 'rhel',
     [ValidateRange(1, 8)][int]$Total = 8,
     [string[]]$Levels = @('1', '2', '4', '6', '8'),
@@ -121,6 +122,36 @@ function Restore-Hosts([object[]]$List) {
     Write-Ok "restored to baseline: $(($List.Name) -join ', ')"
 }
 
+# One summary row per level, from the cycle report.
+function Get-LevelRow([int]$n, $d, $report, [string]$arn) {
+    $hs = @($report.results)
+    $ok = @($hs | Where-Object { $_.status -like 'patched*' })
+    $durs = @($ok | ForEach-Object { [double]$_.duration_s })
+    $rd = @($ok | Where-Object platform -eq 'rhel' | ForEach-Object { [double]$_.duration_s })
+    $wd = @($ok | Where-Object platform -eq 'windows' | ForEach-Object { [double]$_.duration_s })
+    [pscustomobject]@{
+        Hosts      = $n
+        Status     = $d.status
+        Patched    = $ok.Count
+        Failed     = @($hs | Where-Object status -eq 'failed').Count
+        CycleS     = $report.duration_s
+        AvgHostS   = if ($durs) { [math]::Round(($durs | Measure-Object -Average).Average, 1) } else { $null }
+        MaxHostS   = if ($durs) { ($durs | Measure-Object -Maximum).Maximum } else { $null }
+        MinHostS   = if ($durs) { ($durs | Measure-Object -Minimum).Minimum } else { $null }
+        RhelAvgS   = if ($rd) { [math]::Round(($rd | Measure-Object -Average).Average, 1) } else { $null }
+        WinAvgS    = if ($wd) { [math]::Round(($wd | Measure-Object -Average).Average, 1) } else { $null }
+        Before     = (@($hs.advisories_before) | Select-Object -Unique) -join '/'
+        Execution  = $arn.Split(':')[-1]
+    }
+}
+function Get-Report($d) {
+    if ($d.output) { return $d.output | ConvertFrom-Json }
+    if ($d.cause) { try { return $d.cause | ConvertFrom-Json } catch { } }
+    $null
+}
+$cols = if ($Platform -eq 'mixed') { 'Hosts', 'Status', 'Patched', 'Failed', 'CycleS', 'RhelAvgS', 'WinAvgS', 'MaxHostS', 'Before' }
+        else { 'Hosts', 'Status', 'Patched', 'Failed', 'CycleS', 'AvgHostS', 'MinHostS', 'MaxHostS', 'Before' }
+
 switch ($Action) {
 # ------------------------------------------------------------------ status
 'status' {
@@ -206,8 +237,6 @@ switch ($Action) {
     if ((Read-Host 'Type SCALE to start') -cne 'SCALE') { Write-Note 'cancelled'; break }
 
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $cols = if ($Platform -eq 'mixed') { 'Hosts', 'Status', 'Patched', 'Failed', 'CycleS', 'RhelAvgS', 'WinAvgS', 'MaxHostS', 'Before' }
-            else { 'Hosts', 'Status', 'Patched', 'Failed', 'CycleS', 'AvgHostS', 'MinHostS', 'MaxHostS', 'Before' }
     $rows = @()
     foreach ($n in $LevelNums) {
         $level = @($all | Where-Object { $_.Name -in $names[0..($n - 1)] })
@@ -224,36 +253,28 @@ switch ($Action) {
         $arn = (Invoke-Aws stepfunctions start-execution --state-machine-arn $StateMachineArn --name $execName `
                 --input file://build/exp3-input.json).executionArn
         $t0 = Get-Date
+        $warned = $false
         do {
             Start-Sleep $PollSeconds
-            $d = Invoke-Aws stepfunctions describe-execution --execution-arn $arn
+            # The cycle runs in Step Functions whether or not this window can reach AWS. If a call fails
+            # (most often an expired sign-in), keep waiting: sign in again in another window and this continues.
+            try { $d = Invoke-Aws stepfunctions describe-execution --execution-arn $arn; $warned = $false }
+            catch {
+                if (-not $warned) {
+                    Write-Note "cannot reach AWS: $(($_.Exception.Message -split "`n" | Where-Object { $_ } | Select-Object -Last 1))"
+                    Write-Note 'The cycle keeps running. If your sign-in expired, run  aws login  in another PowerShell window; this run then continues.'
+                    $warned = $true
+                }
+                $d = [pscustomobject]@{ status = 'RUNNING' }
+                continue
+            }
             Write-Host ("   {0}  {1}  elapsed {2:mm\:ss}" -f (Get-Date -Format 'HH:mm:ss'), $d.status, ((Get-Date) - $t0))
         } while ($d.status -eq 'RUNNING')
 
-        $report = $null
-        if ($d.output) { $report = $d.output | ConvertFrom-Json }
-        elseif ($d.cause) { try { $report = $d.cause | ConvertFrom-Json } catch { } }
+        $report = Get-Report $d
         Save-Json ([ordered]@{ execution = $arn; status = $d.status; error = $d.error; level = $n; report = $report }) `
             (Join-Path $EvidenceDir "$($arn.Split(':')[-1]).json") -Depth 30
-        $hs = @($report.results)
-        $ok = @($hs | Where-Object { $_.status -like 'patched*' })
-        $durs = @($ok | ForEach-Object { [double]$_.duration_s })
-        $rd = @($ok | Where-Object platform -eq 'rhel' | ForEach-Object { [double]$_.duration_s })
-        $wd = @($ok | Where-Object platform -eq 'windows' | ForEach-Object { [double]$_.duration_s })
-        $row = [pscustomobject]@{
-            Hosts      = $n
-            Status     = $d.status
-            Patched    = @($hs | Where-Object status -like 'patched*').Count
-            Failed     = @($hs | Where-Object status -eq 'failed').Count
-            CycleS     = $report.duration_s
-            AvgHostS   = if ($durs) { [math]::Round(($durs | Measure-Object -Average).Average, 1) } else { $null }
-            MaxHostS   = if ($durs) { ($durs | Measure-Object -Maximum).Maximum } else { $null }
-            MinHostS   = if ($durs) { ($durs | Measure-Object -Minimum).Minimum } else { $null }
-            RhelAvgS   = if ($rd) { [math]::Round(($rd | Measure-Object -Average).Average, 1) } else { $null }
-            WinAvgS    = if ($wd) { [math]::Round(($wd | Measure-Object -Average).Average, 1) } else { $null }
-            Before     = (@($hs.advisories_before) | Select-Object -Unique) -join '/'
-            Execution  = $arn.Split(':')[-1]
-        }
+        $row = Get-LevelRow $n $d $report $arn
         $rows += $row
         $row | Format-Table $cols -AutoSize | Out-String -Width 200 | Write-Host
     }
@@ -264,6 +285,47 @@ switch ($Action) {
     $rows | Export-Csv $csv -Encoding utf8
     Write-Ok "saved $csv"
     Write-Note 'Hosts are left patched. Teardown clones with: .\exp3-scale.ps1 -Action teardown'
+}
+
+# ------------------------------------------------------------------ collect
+# For a run whose PowerShell window stopped (expired sign-in, closed window, lost network): the cycles
+# themselves keep running in Step Functions. This finds today's exp3-<platform>-n<level> executions, waits for
+# any still running, saves each one's evidence file if it is missing, and writes the summary CSV.
+'collect' {
+    $today = Get-Date -Format 'yyyyMMdd'
+    $ex = @((Invoke-Aws stepfunctions list-executions --state-machine-arn $StateMachineArn --max-results 50).executions |
+            Where-Object { $_.name -match "^exp3-$Platform-n(\d+)-$today-" })
+    Write-Step "Collect Experiment 3 ($Platform) executions from today"
+    if (-not $ex) { Write-Note "no exp3-$Platform executions today"; break }
+    # The latest execution per level counts (a level that was run again replaces the earlier attempt).
+    $latest = @($ex | Group-Object { [int]($_.name -replace "^exp3-$Platform-n(\d+)-.*$", '$1') } |
+                ForEach-Object { $_.Group | Sort-Object startDate | Select-Object -Last 1 } | Sort-Object startDate)
+    $latest | ForEach-Object { [pscustomobject]@{ Execution = $_.name; Status = $_.status } } | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
+    $rows = @()
+    foreach ($e in $latest) {
+        $n = [int]($e.name -replace "^exp3-$Platform-n(\d+)-.*$", '$1')
+        $t0 = Get-Date
+        do {
+            $d = Invoke-Aws stepfunctions describe-execution --execution-arn $e.executionArn
+            if ($d.status -eq 'RUNNING') {
+                Write-Host ("   {0}  level {1} still RUNNING, waiting  {2:mm\:ss}" -f (Get-Date -Format 'HH:mm:ss'), $n, ((Get-Date) - $t0))
+                Start-Sleep $PollSeconds
+            }
+        } while ($d.status -eq 'RUNNING')
+        $report = Get-Report $d
+        $file = Join-Path $EvidenceDir "$($e.name).json"
+        if (Test-Path $file) { Write-Ok "level ${n}: evidence already saved" }
+        else {
+            Save-Json ([ordered]@{ execution = $e.executionArn; status = $d.status; error = $d.error; level = $n; report = $report }) $file -Depth 30
+            Write-Ok "level ${n}: saved $file"
+        }
+        $rows += Get-LevelRow $n $d $report $e.executionArn
+    }
+    Write-Step "Experiment 3 summary ($Platform)"
+    $rows | Format-Table $cols -AutoSize | Out-String -Width 200 | Write-Host
+    $csv = Join-Path $EvidenceDir "exp3-$Platform-summary-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
+    $rows | Export-Csv $csv -Encoding utf8
+    Write-Ok "saved $csv"
 }
 
 # ------------------------------------------------------------------ teardown
