@@ -98,6 +98,24 @@
   }
   function num(v) { return typeof v === 'number' && isFinite(v) ? v : 0; }
   function short(h) { return String(h || '').replace('serverless-patch-', ''); }
+  // The site's log tables show a few columns in plain words; the CloudWatch widgets keep every raw
+  // Logs Insights column for anyone who needs them.
+  function when(ts) { var ms = tsMs(ts); if (isNaN(ms)) return ''; var d = myt(ms); return d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()] + ', ' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()); }
+  function span(s) {
+    if (s == null || !isFinite(s)) return '';
+    s = Math.round(s);
+    if (s < 60) return s + 's';
+    if (s < 3600) return Math.floor(s / 60) + 'm ' + pad(s % 60) + 's';
+    return Math.floor(s / 3600) + 'h ' + pad(Math.floor(s % 3600 / 60)) + 'm';
+  }
+  function usd(v) { return v == null || !isFinite(v) ? '' : '$' + (v < 0.01 ? v.toFixed(4) : v.toFixed(2)); }
+  function changeText(r) {
+    if (r.before == null) return '';
+    var b = num(r.before).toLocaleString('en');
+    return r.mode === 'patch' && r.after != null ? b + ' \u2192 ' + num(r.after).toLocaleString('en') : b + ' found';
+  }
+  function resultText(r) { return (r.status || '') + (r.failed_at ? ' at ' + r.failed_at : ''); }
+  var PLATFORM_NAME = { rhel: 'RHEL 9', windows: 'Windows Server 2022' };
   function cell(v) {                                                      // a Logs Insights table value
     if (v == null || v === '') return '';
     if (typeof v === 'number') return Number.isInteger(v) ? String(v) : String(Math.round(v * 10000) / 10000);
@@ -292,15 +310,15 @@
     else seriesNames.forEach(function (n2, si) { legendItem(f, PALETTE[si % PALETTE.length], n2, true); });
   }
 
-  function table(body, cols, rows) {
+  function table(body, cols, rows, right) {
     if (!rows.length) { note(body, 'No data found.'); return; }
     var t = el('table', 'cw-table'), thead = el('thead'), hr = el('tr');
-    cols.forEach(function (c) { hr.appendChild(el('th', null, c)); });
+    cols.forEach(function (c, i) { hr.appendChild(el('th', right && right.indexOf(i) >= 0 ? 'n' : null, c)); });
     thead.appendChild(hr); t.appendChild(thead);
     var tb = el('tbody');
     rows.forEach(function (r) {
       var tr = el('tr');
-      r.forEach(function (v) { tr.appendChild(el('td', typeof v === 'number' ? 'n' : null, cell(v))); });
+      r.forEach(function (v, i) { tr.appendChild(el('td', typeof v === 'number' || (right && right.indexOf(i) >= 0) ? 'n' : null, cell(v))); });
       tb.appendChild(tr);
     });
     t.appendChild(tb); body.appendChild(t);
@@ -396,10 +414,10 @@
     lineChart(body, [{ name: 'Deployment time (s)', colour: GREY, points: pts }],
       { log: useLog(), start: Date.parse(state.data.range.start), end: Date.parse(state.data.range.end), label: 'Deployment time per run' });
   };
-  var HIST_COLS = ['@timestamp', 'mode', 'status', 'unit', 'before', 'after', 'succeeded', 'attempted', 'duration_s', 'rebooted', 'healthy', 'failed_at'];
   W.hostHistory = function (body) {
     var rows = hostRecs(state.data).filter(function (r) { return r.host === state.host; }).slice(0, 20);
-    table(body, HIST_COLS, rows.map(function (r) { return HIST_COLS.map(function (c) { return c === '@timestamp' ? stamp(r._ts) : r[c]; }); }));
+    table(body, ['Time (MYT)', 'Run', 'Result', 'Updates', 'Duration'],
+      rows.map(function (r) { return [when(r._ts), r.mode, resultText(r), changeText(r), span(r.duration_s)]; }), [3, 4]);
   };
   function seriesByHost() {
     var by = {};
@@ -447,8 +465,8 @@
       var g = byN[n], avg = function (k) { return g.reduce(function (a, x) { return a + x[k]; }, 0) / g.length; };
       return { label: String(n), values: [avg('run_s'), avg('host_s')] };
     });
-    barChart(body, groups, ['total_workflow_s', 'per_host_s'], {
-      xLabels: function (g) { return 'hosts_in_run ' + g.label; }, label: 'Scalability',
+    barChart(body, groups, ['Whole run (s)', 'Per host, average (s)'], {
+      xLabels: function (g) { return g.label + (g.label === '1' ? ' host' : ' hosts'); }, label: 'Scalability',
       footnote: groups.length === 1 ? 'Only ' + groups[0].label + '-host runs in this range, so there is no host count to compare yet.' : null,
     });
   };
@@ -498,8 +516,12 @@
       var x = g[k] || (g[k] = { platform: r.platform, unit: r.unit, verified: 0, tried: 0, host_runs: 0 });
       x.verified += num(r.succeeded); x.tried += num(r.attempted); x.host_runs += 1;
     });
-    var rows = Object.keys(g).sort().map(function (k) { var x = g[k]; return [x.platform, x.unit, x.verified, x.tried, 100 * x.verified / x.tried, x.host_runs]; });
-    table(body, ['platform', 'unit', 'verified', 'tried', 'success_pct', 'host_runs'], rows);
+    var rows = Object.keys(g).sort().map(function (k) {
+      var x = g[k];
+      return [PLATFORM_NAME[x.platform] || x.platform, x.verified.toLocaleString('en') + ' of ' + x.tried.toLocaleString('en') + ' ' + (x.unit || ''),
+        (100 * x.verified / x.tried).toFixed(1) + '%', x.host_runs];
+    });
+    table(body, ['Platform', 'Updates verified fixed', 'Success', 'Patch runs'], rows, [1, 2, 3]);
   };
   W.costSv = function (body) {
     if (state.data.cost_known === false) { note(body, 'Cost is estimated in CloudWatch from each execution\'s history and is not in the evidence files; it appears on the published site.'); return; }
@@ -513,14 +535,15 @@
   };
   W.costTable = function (body) {
     var rows = cycleRecs(state.data).filter(function (r) { return r.mode === 'patch'; }).slice(0, 20);
-    table(body, ['@timestamp', 'hosts', 'cycle_s', 'transitions', 'invokes', 'gb_s', 'sfn_usd', 'lambda_usd', 'total_usd'],
-      rows.map(function (r) { return [stamp(r._ts), r.hosts_total, r.duration_s, r.transitions, r.lambda_invocations, r.lambda_gb_s, r.cost_sfn_usd, r.cost_lambda_usd, r.cost_usd]; }));
+    table(body, ['Time (MYT)', 'Hosts', 'Duration', 'Step Functions', 'Lambda', 'Total cost'],
+      rows.map(function (r) { return [when(r._ts), r.hosts_total, span(r.duration_s), usd(r.cost_sfn_usd), usd(r.cost_lambda_usd), usd(r.cost_usd)]; }), [1, 2, 3, 4, 5]);
   };
-  var LATEST_COLS = ['@timestamp', 'mode', 'host', 'status', 'unit', 'before', 'after', 'succeeded', 'attempted', 'duration_s', 'rebooted', 'healthy', 'failed_at'];
   W.latest = function (body) {
-    table(body, LATEST_COLS, hostRecs(state.data).slice(0, 30).map(function (r) {
-      return LATEST_COLS.map(function (c) { return c === '@timestamp' ? stamp(r._ts) : r[c]; });
-    }));
+    table(body, ['Time (MYT)', 'Host', 'Run', 'Result', 'Updates', 'Duration', 'Workload after'],
+      hostRecs(state.data).slice(0, 30).map(function (r) {
+        return [when(r._ts), short(r.host), r.mode, resultText(r), changeText(r), span(r.duration_s),
+          r.healthy === true ? 'healthy' : r.healthy === false ? 'not healthy' : ''];
+      }), [4, 5]);
   };
 
   // ------------------------------------------------------------ grid

@@ -112,7 +112,7 @@
   padding: 5px 6px; border-bottom: 1px solid var(--cw-border); white-space: nowrap; z-index: 1; }
 .cw-table td { padding: 4px 6px; border-bottom: 1px solid var(--cw-border); white-space: nowrap; color: var(--cw-text); }
 .cw-table tbody tr:nth-child(even) td { background: var(--cw-row-alt); }
-.cw-table td.n { text-align: right; }
+.cw-table td.n, .cw-table th.n { text-align: right; }
 .cw-wb.cw-tbl { padding: 0 0 4px; }
 .cw-tfoot { position: sticky; left: 0; padding: 2px 8px 6px; }
 .cw-fade { position: absolute; right: 0; bottom: 0; width: 44px; pointer-events: none;

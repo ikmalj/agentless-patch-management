@@ -235,6 +235,11 @@ directly (newest scan first, 1,000 lines each); the publisher writes the latest 
 `data/updates.json` for the website (up to 1,000 lines of each). The lists appear after the first scan or patch cycle that runs
 with the updated patch Lambdas (`.\deploy-framework.ps1`).
 
+**Log tables in plain words.** On the website the log tables (run history, latest host results, cost per
+cycle, success rate by platform) show a few columns in plain words: time in MYT, "425 → 0" updates,
+durations such as "4m 56s" and costs in dollars. The CloudWatch widgets keep every raw Logs Insights
+column.
+
 | File | Purpose |
 |---|---|
 | `site/index.html` | The page |
