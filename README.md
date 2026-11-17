@@ -1,4 +1,4 @@
-# Centralized Agentless Patch Management using Serverless Orchestration
+# Centralized Agentless Patch Management using Serverless Orchestration for Multi-Platform Systems
 
 A serverless framework on AWS that patches Red Hat Enterprise Linux 9 and Windows Server 2022 hosts
 **without installing any agent**. A Lambda function reaches each host over its built-in remote protocol
