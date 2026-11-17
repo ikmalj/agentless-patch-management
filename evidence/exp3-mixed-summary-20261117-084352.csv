@@ -1,0 +1,3 @@
+"Hosts","Status","Patched","Failed","CycleS","AvgHostS","MaxHostS","MinHostS","RhelAvgS","WinAvgS","Before","Execution"
+"3","SUCCEEDED","3","0","2226.3","948.3","2226.2","292.7","309.4","2226.2","425/4","exp3-mixed-n3-20261117-084944"
+"6","SUCCEEDED","6","0","2149.1","893.6","2148.9","261.2","273.3","2134","425/4","exp3-mixed-n6-20261117-093301"

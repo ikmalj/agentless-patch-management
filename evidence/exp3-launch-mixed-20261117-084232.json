@@ -1,0 +1,19 @@
+{
+  "launched_at": "2026-11-17T08:42:32",
+  "platform": "mixed",
+  "instances": [
+    "i-0bdffd5f2bac7ae6f",
+    "i-043ce735811d600f8",
+    "i-0cb72955cb6c588a5"
+  ],
+  "names": [
+    "serverless-patch-rhel-03",
+    "serverless-patch-rhel-04",
+    "serverless-patch-win-02"
+  ],
+  "amis": [
+    "ami-0bf7b60a5f0dc4edc",
+    "ami-0bf7b60a5f0dc4edc",
+    "ami-01b25632c46bf40fb"
+  ]
+}
