@@ -56,7 +56,7 @@ box(20, 510, 170, 58, 'GitHub', ['code and pull requests'], 'ink')
 box(232, 510, 176, 58, 'deploy-site.ps1', ['PowerShell + AWS CLI'], 'muted')
 box(690, 510, 180, 58, 'S3 (private)', ['site files, data/*.json'], 's3')
 box(910, 510, 190, 58, 'CloudFront + ACM', ['HTTPS, cache, OAC'], 'cdn')
-box(910, 612, 190, 52, 'fyp.ikmaljohari.my', ['Cloudflare DNS to visitors'], 'accent')
+box(880, 612, 220, 52, 'agentless.ikmaljohari.my', ['Cloudflare DNS to visitors'], 'accent')
 edge([(262, 206), (262, 356), (105, 356), (105, 376)], 'publish', (180, 350))
 edge([(320, 206), (320, 376)])
 edge([(392, 206), (392, 318), (1005, 318), (1005, 376)], 'execution status events', (700, 312))
@@ -79,7 +79,7 @@ svg = ('<svg class="arch-svg" viewBox="0 0 1120 680" role="img" aria-labelledby=
        'Its execution status events trigger an EventBridge rule, which runs serverless-patch-site-publisher; the publisher reads '
        'CloudWatch and writes the dashboard data to a private S3 bucket. GitHub holds the code, and deploy-site.ps1 uploads the '
        'site to S3. CloudFront with an ACM certificate serves the bucket over HTTPS through Origin Access Control to visitors '
-       'of fyp.ikmaljohari.my, whose DNS is at Cloudflare.</desc>'
+       'of agentless.ikmaljohari.my, whose DNS is at Cloudflare.</desc>'
        '<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
        '<path class="arr-h" d="M0 0L10 5L0 10z"/></marker></defs>'
        + ''.join(out) + '</svg>')
