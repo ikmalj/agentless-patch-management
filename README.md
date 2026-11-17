@@ -159,7 +159,7 @@ Earlier runs (iterations 1 and 2) are reported as iteration history, not mixed i
 ### Experiment 3: Scalability
 
 RHEL carries the scaling series: the question is whether the orchestration layer keeps up as hosts are added,
-and a RHEL run takes about 4 minutes against about 25 for Windows. Each level starts from baseline.
+and a RHEL run takes about 4 to 5 minutes against about 32 to 37 for Windows. Each level starts from baseline.
 
 The evaluation ran 1, 2 and 4 RHEL hosts (13 Nov 2026), a smaller series than the 1, 2, 4, 6, 8 first
 planned, to fit the time and the AWS credits. These are the commands that produced it:
@@ -178,6 +178,8 @@ and a Windows add-on (`-Platform windows -Total 2 -Levels 1,2`). Teardown remove
 
 Mixed series (both platforms, testbed ratio of two RHEL hosts to one Windows host): level 3 is the testbed
 (rhel-01, rhel-02, win-01) and level 6 doubles it with clones rhel-03, rhel-04 and win-02 (12 of 16 vCPUs).
+The reported run is 17 Nov 2026. If the PowerShell window stops during a run (for example an expired
+`aws login`), the cycles still finish in Step Functions: `-Action collect -Platform mixed` saves their results.
 
 ```powershell
 .\lab.ps1 endpoint-up ; .\lab.ps1 start-all
@@ -191,30 +193,34 @@ Mixed series (both platforms, testbed ratio of two RHEL hosts to one Windows hos
 No extra runs are needed: the metrics Lambda estimates the cost of every patch cycle from its execution
 history. The prices are environment variables (`PRICE_*`) on `serverless-patch-metrics`; check them against
 the ap-southeast-5 prices before reporting: `.\exp4-prices.ps1` reads them from the AWS Price List API and saves them
-under `evidence\exp4-prices-*`. The estimate covers the serverless control plane only
-(Step Functions, Lambda, SNS). EC2 hosts and the VPC endpoint are excluded by design.
+under `evidence\exp4-prices-*`. The per-cycle estimate covers the serverless control plane only
+(Step Functions, Lambda, SNS) and uses US East prices by default, which are 10% above ap-southeast-5.
+EC2 hosts are excluded; the Secrets Manager endpoint and the secrets are monthly fixed costs, reported separately.
 
-### Results (evaluation period, 1 to 13 Nov 2026)
+### Results
 
-From `evidence\` and the metrics log group; the same figures the website's Evaluation view and
-`PatchManagement-Dashboard` show for that period. Success counts only updates confirmed fixed by the rescan.
+From `evidence\` and the metrics log group. Success counts only updates confirmed fixed by the rescan. The
+CloudWatch dashboard and the website total every run in the selected time range, so over a longer range
+their figures include the earlier iterations below.
 
 | Experiment | Result |
 |---|---|
-| 1: deployment time | RHEL about 4 min per host (avg 238 s in the final runs); Windows about 32 min (avg 1,936 s). A 3-host cycle takes as long as its Windows branch (avg 1,936 s), because the hosts run in parallel |
-| 2: success rate | 99.9% overall (7,766 / 7,774) over 20 patch cycles. RHEL 100% (7,715 / 7,715 advisories), Windows 86.4% (51 / 59 KBs) |
-| 3: scalability | RHEL, time per host: 338 s at 1 host, 330 s at 2, 284 s at 4. Whole run 338, 362 and 296 s: no growth as hosts are added |
-| 4: operational cost | USD 0.0041 per 3-host patch cycle, USD 0.0029 average over the 20 cycles (USD 0.058 in total). Step Functions, Lambda and SNS only, at list price before the free tier |
+| 1: deployment time (7 to 8 Nov, final framework, 50 GB Windows baseline) | RHEL mean 237.9 s per host (8 host runs); Windows mean 1,934.7 s (11); 3-host cycle mean 1,935.9 s (4 cycles). Hosts run in parallel, so a cycle lasts as long as its Windows host |
+| 2: success rate (same runs) | RHEL 100% (3,168 / 3,168 advisories, 8 / 8 host runs); Windows 91.7% (44 / 48 KBs, 11 / 12 host runs; 7 / 7 after the WinRM retry `d8203f4`); all hosts 99.9% (3,212 / 3,216) |
+| 3: scalability | RHEL (13 Nov): time per host 337.9, 330.3 and 284.2 s at 1, 2 and 4 hosts. Mixed, 2 RHEL to 1 Windows (17 Nov): cycle 2,226.3 s at 3 hosts and 2,149.1 s at 6; RHEL per host 309.4 and 273.3 s, Windows 2,226.2 and 2,134.0 s. Resource use grows linearly: about 15 state transitions per RHEL host and about 90 per Windows host |
+| 4: operational cost (ap-southeast-5 list prices, 17 Nov) | USD 0.0037 per 3-host testbed cycle before the free tier; weekly testbed patching stays inside the always-free Lambda, Step Functions and SNS allowances. Fixed: 2 secrets USD 0.80 a month; the Secrets Manager endpoint USD 8.54 a month if always on, about USD 0.05 if it exists only during cycles |
 
-Windows success by iteration (the reason the period figure is below the final one):
+Windows success by iteration:
 
 | Runs | Workflow | Windows result |
 |---|---|---|
 | 1 Nov | Iteration 2 | 3 of 4 KBs; KB5131594 (Recovery Environment) left for a manual follow-up |
-| 4 to 5 Nov | Iteration 3, first runs | Follow-up passes inside the cycle (61 min), still 3 of 4 |
-| 7 to 8 Nov | Iteration 3, final (12 runs) | 91.7% (44 / 48): 11 runs installed all 4 KBs on the first pass. One failed its post-reboot health check with WinRM "Access is denied", fixed the same day by a retry (`d8203f4`) |
+| 4 to 5 Nov | Iteration 3, first runs | Follow-up passes inside the cycle (61 min), still 3 of 4: the 30 GB disk was too small for the Recovery Environment update |
+| 7 to 8 Nov | Iteration 3, final, 50 GB baseline (12 runs) | 91.7% (44 / 48): 11 runs installed all 4 KBs on the first pass. One failed its post-reboot health check with WinRM "Access is denied", fixed the same day by a retry (`d8203f4`) |
 
-RHEL was 100% in every run. Later runs (14 and 16 Nov) are outside the evaluation period.
+RHEL was 100% in every run. Later runs: 14 Nov win-01 retest with the November updates (4 to 0 in one pass,
+2,018.6 s), reported separately because the update set changed; 16 Nov mixed series run, not reported (the
+`aws login` session expired during level 6), with results that agree with 17 Nov.
 
 ### Exporting Results For The Report
 
