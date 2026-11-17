@@ -52,7 +52,7 @@ while ($done.Count -lt $tasks.Count) {
 }
 
 Save-Json ([ordered]@{ restored_at = (Get-Date).ToString('s'); tasks = $tasks; result = $done }) `
-    (Join-Path $EvidenceDir ("restore-{0}.json" -f (Get-Date -Format 'yyyyMMdd-HHmmss')))
+    (Get-EvidenceFile restore ("restore-{0}.json" -f (Get-Date -Format 'yyyyMMdd-HHmmss')))
 if ($done.Values -contains 'succeeded') {
     Write-Note 'Hosts reboot onto the baseline disk. Wait ~1 min, then confirm with: .\test-rhel.ps1'
 }

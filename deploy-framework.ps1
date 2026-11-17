@@ -133,7 +133,7 @@ $summary = [ordered]@{
     weekly_schedule  = $WeeklySchedule
 }
 $summary.GetEnumerator() | ForEach-Object { Write-Ok ('{0,-16} {1}' -f $_.Key, $_.Value) }
-Save-Json $summary (Join-Path $EvidenceDir 'deploy-framework.json')
+Save-Json $summary (Get-EvidenceFile deploy 'deploy-framework.json')
 Write-Host "`nDone. Next: .\test-rhel.ps1" -ForegroundColor Cyan
 
 } finally { Pop-Location }

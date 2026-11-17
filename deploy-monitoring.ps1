@@ -178,7 +178,7 @@ $mf = Invoke-Aws lambda get-function-configuration --function-name $MetricsFn
 Write-Ok "$MetricsFn  sha256 $($mf.CodeSha256), $($mf.Runtime), $($mf.MemorySize) MB, timeout $($mf.Timeout) s, VPC: $(if ($mf.VpcConfig.SubnetIds) { 'yes (unexpected)' } else { 'none' })"
 
 # Read-only self test against a real result file (no execution ARN, so no history call).
-$sample = Get-ChildItem (Join-Path $EvidenceDir 'cycle-patch-*.json') -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
+$sample = Get-ChildItem (Join-Path $EvidenceDir 'cycles' 'cycle-patch-*.json') -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
 if ($sample) {
     $rep = (Get-Content $sample.FullName -Raw | ConvertFrom-Json).report
     Save-Json @{ kind = 'cycle'; report = $rep; notify = $false; self_test = $true } (Join-Path $BuildDir 'metrics-selftest.json') -Depth 30
@@ -285,7 +285,7 @@ $summary = [ordered]@{
     summary_widget    = $widgetFnArn
 }
 $summary.GetEnumerator() | ForEach-Object { Write-Ok ('{0,-17} {1}' -f $_.Key, $_.Value) }
-Save-Json $summary (Join-Path $EvidenceDir 'deploy-monitoring.json')
+Save-Json $summary (Get-EvidenceFile deploy 'deploy-monitoring.json')
 if ($summary.email_status -ne 'confirmed') { Write-Note 'Confirm the email subscription before the test run, or the email is dropped.' }
 Write-Host "`nDone. Next: .\run-cycle.ps1 -Notify   (scan only, sends a test email, fills the logs widgets)" -ForegroundColor Cyan
 

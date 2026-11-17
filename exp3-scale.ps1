@@ -218,7 +218,7 @@ switch ($Action) {
     Write-Ok 'running. They are already at baseline (fresh from the AMI); every level restores them again anyway.'
     Save-Json ([ordered]@{ launched_at = (Get-Date).ToString('s'); platform = $Platform
                           instances = @($launched.Id); names = @($launched.Name); amis = @($launched.Ami) }) `
-        (Join-Path $EvidenceDir ("exp3-launch-{0}-{1}.json" -f $Platform, (Get-Date -Format 'yyyyMMdd-HHmmss')))
+        (Get-EvidenceFile exp3 ("exp3-launch-{0}-{1}.json" -f $Platform, (Get-Date -Format 'yyyyMMdd-HHmmss')))
 }
 
 # ------------------------------------------------------------------ run
@@ -273,7 +273,7 @@ switch ($Action) {
 
         $report = Get-Report $d
         Save-Json ([ordered]@{ execution = $arn; status = $d.status; error = $d.error; level = $n; report = $report }) `
-            (Join-Path $EvidenceDir "$($arn.Split(':')[-1]).json") -Depth 30
+            (Get-EvidenceFile exp3 "$($arn.Split(':')[-1]).json") -Depth 30
         $row = Get-LevelRow $n $d $report $arn
         $rows += $row
         $row | Format-Table $cols -AutoSize | Out-String -Width 200 | Write-Host
@@ -281,7 +281,7 @@ switch ($Action) {
 
     Write-Step "Experiment 3 summary ($Platform)"
     $rows | Format-Table $cols -AutoSize | Out-String -Width 200 | Write-Host
-    $csv = Join-Path $EvidenceDir "exp3-$Platform-summary-$stamp.csv"
+    $csv = Get-EvidenceFile exp3 "exp3-$Platform-summary-$stamp.csv"
     $rows | Export-Csv $csv -Encoding utf8
     Write-Ok "saved $csv"
     Write-Note 'Hosts are left patched. Teardown clones with: .\exp3-scale.ps1 -Action teardown'
@@ -313,7 +313,7 @@ switch ($Action) {
             }
         } while ($d.status -eq 'RUNNING')
         $report = Get-Report $d
-        $file = Join-Path $EvidenceDir "$($e.name).json"
+        $file = Get-EvidenceFile exp3 "$($e.name).json"
         if (Test-Path $file) { Write-Ok "level ${n}: evidence already saved" }
         else {
             Save-Json ([ordered]@{ execution = $e.executionArn; status = $d.status; error = $d.error; level = $n; report = $report }) $file -Depth 30
@@ -323,7 +323,7 @@ switch ($Action) {
     }
     Write-Step "Experiment 3 summary ($Platform)"
     $rows | Format-Table $cols -AutoSize | Out-String -Width 200 | Write-Host
-    $csv = Join-Path $EvidenceDir "exp3-$Platform-summary-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
+    $csv = Get-EvidenceFile exp3 "exp3-$Platform-summary-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
     $rows | Export-Csv $csv -Encoding utf8
     Write-Ok "saved $csv"
 }

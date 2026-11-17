@@ -47,6 +47,13 @@ $Hosts = [ordered]@{
 $EvidenceDir = Join-Path $PSScriptRoot 'evidence'
 $BuildDir    = Join-Path $PSScriptRoot 'build'
 
+# Evidence is filed by kind: cycles, tests, restore, deploy, exp3, exp4 (website holds screenshots).
+function Get-EvidenceFile([string]$Folder, [string]$Name) {
+    $dir = Join-Path $EvidenceDir $Folder
+    New-Item -ItemType Directory -Force $dir | Out-Null
+    Join-Path $dir $Name
+}
+
 # Run an AWS CLI command, throw on failure, return parsed JSON (or $null when there is no output).
 function Invoke-Aws {
     $errPath = [System.IO.Path]::GetTempFileName()

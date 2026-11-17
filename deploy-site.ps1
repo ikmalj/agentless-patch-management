@@ -433,7 +433,7 @@ $summary = [ordered]@{
     files           = @($files)
 }
 $summary.GetEnumerator() | Where-Object Key -ne 'files' | ForEach-Object { Write-Ok ('{0,-16} {1}' -f $_.Key, $_.Value) }
-Save-Json $summary (Join-Path $EvidenceDir 'deploy-site.json')
+Save-Json $summary (Get-EvidenceFile deploy 'deploy-site.json')
 Write-Host "`nDone. Website: $url" -ForegroundColor Cyan
 
 } finally { Pop-Location }

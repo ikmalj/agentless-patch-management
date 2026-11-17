@@ -11,8 +11,8 @@
                       EventBridge Scheduler invocations
     per month         Secrets Manager secrets and API calls, the Secrets Manager interface endpoint,
                       CloudWatch logs, custom metrics and dashboards
-  Output: a price table on screen, evidence\exp4-prices-<region>-<time>.csv (the rows shown) and
-  evidence\exp4-prices-<region>-<time>.json (every price returned for these services, for checking).
+  Output: a price table on screen, evidence\exp4\exp4-prices-<region>-<time>.csv (the rows shown) and
+  evidence\exp4\exp4-prices-<region>-<time>.json (every price returned for these services, for checking).
 
 .EXAMPLE
   .\exp4-prices.ps1
@@ -80,9 +80,9 @@ $rows | Format-Table Service, UsageType, Unit, USD, From, To,
     @{ Label = 'Description'; Expression = { if ($_.Description.Length -gt 70) { $_.Description.Substring(0, 70) + '...' } else { $_.Description } } } `
     -AutoSize | Out-String -Width 260 | Write-Host
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$csv = Join-Path $EvidenceDir "exp4-prices-$PriceRegion-$stamp.csv"
+$csv = Get-EvidenceFile exp4 "exp4-prices-$PriceRegion-$stamp.csv"
 $rows | Export-Csv $csv -Encoding utf8
 Save-Json ([ordered]@{ region = $PriceRegion; retrieved_at = (Get-Date).ToString('o'); source = 'AWS Price List API (pricing get-products)'
-                       products = $all }) (Join-Path $EvidenceDir "exp4-prices-$PriceRegion-$stamp.json") -Depth 40
+                       products = $all }) (Get-EvidenceFile exp4 "exp4-prices-$PriceRegion-$stamp.json") -Depth 40
 Write-Ok "saved $csv and the full price list (.json)"
 Write-Note 'Unchanged: the PRICE_* values on serverless-patch-metrics. Send the table for the Experiment 4 calculation.'

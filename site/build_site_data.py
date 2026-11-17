@@ -55,7 +55,9 @@ def main():
     args = ap.parse_args()
 
     reports = []
-    paths = glob.glob(os.path.join(EVIDENCE, "cycle-*.json")) + glob.glob(os.path.join(EVIDENCE, "exp3-*-n*.json"))
+    # Reports are filed in evidence/cycles and evidence/exp3; the recursive pattern also finds any at the top level.
+    paths = (glob.glob(os.path.join(EVIDENCE, "**", "cycle-*.json"), recursive=True)
+             + glob.glob(os.path.join(EVIDENCE, "**", "exp3-*-n*.json"), recursive=True))
     for path in sorted(paths):
         with open(path, encoding="utf-8-sig") as f:
             report = (json.load(f) or {}).get("report") or {}

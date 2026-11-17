@@ -175,7 +175,7 @@ try {
     $report = $null
     if ($d.output) { $report = $d.output | ConvertFrom-Json }
     elseif ($d.cause) { try { $report = $d.cause | ConvertFrom-Json } catch { } }
-    $file = Join-Path $EvidenceDir ("cycle-{0}-{1}.json" -f $Mode, ($execArn.Split(':')[-1]))
+    $file = Get-EvidenceFile cycles ("cycle-{0}-{1}.json" -f $Mode, ($execArn.Split(':')[-1]))
     Save-Json ([ordered]@{ execution = $execArn; status = $d.status; error = $d.error; report = $report }) $file -Depth 30
 
     Write-Step "Result: $($d.status)"

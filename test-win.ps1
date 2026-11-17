@@ -16,7 +16,7 @@ try {
         Write-Step "win-01 $action"
         if ($action -eq 'scan') { Write-Host '   Windows Update search can take 1-5 minutes...' }
         Save-Json @{ action = $action; host = $hostObj } (Join-Path $BuildDir 'test-event.json')
-        $out = Join-Path $EvidenceDir "test-win-01-$action-$stamp.json"
+        $out = Get-EvidenceFile tests "test-win-01-$action-$stamp.json"
         $meta = Invoke-Aws lambda invoke --function-name $WinFn --cli-binary-format raw-in-base64-out `
             --cli-read-timeout 900 --payload file://build/test-event.json $out
         $res = Get-Content $out -Raw | ConvertFrom-Json

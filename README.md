@@ -73,7 +73,7 @@ Region `ap-southeast-5` (Asia Pacific, Malaysia). All resources are tagged `proj
 | `restore-baseline.ps1` | Returns hosts to their unpatched baseline AMI (EC2 replace root volume) |
 | `exp3-scale.ps1` | Experiment 3 (scalability): launch clones, run levels from baseline (RHEL, Windows or mixed), teardown |
 | `exp4-prices.ps1` | Experiment 4 (cost): current ap-southeast-5 list prices from the AWS Price List API, saved as evidence (read-only) |
-| `evidence/` | Results of every test, cycle, restore and deploy (JSON, CSV) |
+| `evidence/` | Results of every run, filed by kind: `cycles/`, `tests/`, `restore/`, `deploy/`, `exp3/`, `exp4/`, `website/` (see `evidence/README.md`) |
 | `site/` | Project website: landing page and results dashboard built from `evidence/` (see [Project Website](#project-website)) |
 | `build/` | Generated files (not in the repository) |
 
@@ -128,12 +128,12 @@ several experiments.
 
 | Item | What it shows | How it is produced | Main data |
 |---|---|---|---|
-| Demonstration Run 1 (Linux) | Both RHEL hosts patched in one cycle | Patch cycle on rhel-01 and rhel-02 | `evidence\cycle-patch-*.json`, SNS email |
-| Demonstration Run 2 (Windows) | win-01 patched through the same workflow | Patch cycle on win-01 | `evidence\cycle-patch-*.json`, SNS email |
+| Demonstration Run 1 (Linux) | Both RHEL hosts patched in one cycle | Patch cycle on rhel-01 and rhel-02 | `evidence\cycles\cycle-patch-*.json`, SNS email |
+| Demonstration Run 2 (Windows) | win-01 patched through the same workflow | Patch cycle on win-01 | `evidence\cycles\cycle-patch-*.json`, SNS email |
 | Demonstration full cycle | Trigger to email on all three hosts, no agent | Full 3-host cycle via EventBridge | Step Functions execution history, dashboard |
 | Experiment 1: deployment time | How long a patch cycle takes, per host and per run | Repetition runs (below) | `duration_s` per host and per cycle |
 | Experiment 2: success rate | Updates confirmed fixed / updates attempted, per platform | Repetition runs (below) | `succeeded`, `attempted` per host |
-| Experiment 3: scalability | Cycle time as hosts are added | `exp3-scale.ps1` (below) | `evidence\exp3-*-summary-*.csv` |
+| Experiment 3: scalability | Cycle time as hosts are added | `exp3-scale.ps1` (below) | `evidence\exp3\exp3-*-summary-*.csv` |
 | Experiment 4: operational cost | Serverless cost of one cycle at AWS prices | Every patch run (automatic) | `cost_usd`, `transitions`, `lambda_invocations` per cycle |
 
 ### Experiments 1 and 2: Repetition Runs
@@ -193,7 +193,7 @@ The reported run is 17 Nov 2026. If the PowerShell window stops during a run (fo
 No extra runs are needed: the metrics Lambda estimates the cost of every patch cycle from its execution
 history. The prices are environment variables (`PRICE_*`) on `serverless-patch-metrics`; check them against
 the ap-southeast-5 prices before reporting: `.\exp4-prices.ps1` reads them from the AWS Price List API and saves them
-under `evidence\exp4-prices-*`. The per-cycle estimate covers the serverless control plane only
+under `evidence\exp4\`. The per-cycle estimate covers the serverless control plane only
 (Step Functions, Lambda, SNS) and uses US East prices by default, which are 10% above ap-southeast-5.
 EC2 hosts are excluded; the Secrets Manager endpoint and the secrets are monthly fixed costs, reported separately.
 
@@ -238,7 +238,7 @@ filter record = 'host' and mode = 'patch' and attempted > 0
 | stats sum(succeeded) as verified, sum(attempted) as tried, 100 * sum(succeeded) / sum(attempted) as success_pct,
         100 * sum(first_pass_succeeded) / sum(attempted) as first_pass_pct, avg(passes) as avg_passes by platform
 
-# Experiment 3: Cycle Time by Number of RHEL Hosts (also saved as evidence\exp3-rhel-summary-*.csv)
+# Experiment 3: Cycle Time by Number of RHEL Hosts (also saved as evidence\exp3\exp3-rhel-summary-*.csv)
 filter record = 'host' and mode = 'patch' and percent = 100 and platform = 'rhel' and status like /^patched/
 | stats count(*) as hosts_in_run, max(duration_s) as run_s, avg(duration_s) as host_s by run_id
 | stats avg(run_s) as total_workflow_s, avg(host_s) as per_host_s by hosts_in_run
@@ -292,7 +292,7 @@ column.
 | `site/assets/og.png`, `favicon.svg`, `apple-touch-icon.png` | Link preview picture (1200x630) and icons; the picture is rendered from `site-src/og-card.html` (not published) |
 | `site-src/build_arch_diagram.py` | Writes the architecture diagram (inline SVG) into `site/index.html`; edit and re-run to change it |
 | `site/data/patch-data.js` | Fallback data from `evidence\` (same evidence always gives the same file) |
-| `site/build_site_data.py` | Builds that fallback: evidence reports (`cycle-*.json` and the Experiment 3 runs `exp3-*-n*.json`) -> metrics records (`lambda/metrics.py`) -> the publisher's format |
+| `site/build_site_data.py` | Builds that fallback: evidence reports (`cycles/cycle-*.json` and the Experiment 3 runs `exp3/exp3-*-n*.json`) -> metrics records (`lambda/metrics.py`) -> the publisher's format |
 | `lambda/site_publisher.py` | Lambda `serverless-patch-site-publisher`: writes `data/live.json`, `data/evaluation.json` and `data/updates.json` |
 
 To look at the page locally (opened from disk, Evaluation shows the evidence files; Live needs the published site):
@@ -328,7 +328,7 @@ time) and has no end date, because `$SiteTo` is empty. Set `$SiteTo` (or run
 `.\deploy-site.ps1 -From 2026-11-01 -To 2026-11-13`) only to freeze it to a fixed period. The evidence
 fallback covers the same days.
 
-The URL (`https://<id>.cloudfront.net/`) is printed at the end and saved to `evidence\deploy-site.json`.
+The URL (`https://<id>.cloudfront.net/`) is printed at the end and saved to `evidence\deploy\deploy-site.json`.
 The first deployment takes 5 to 15 minutes to reach the edge locations. Files are uploaded with an
 explicit Content-Type, `build_site_data.py` and dot folders (such as `.hallmark/`) are not uploaded, and the cache is
 cleared on every run.

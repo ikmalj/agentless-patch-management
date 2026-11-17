@@ -18,7 +18,7 @@ try {
             $ev = @{ action = $action; host = $hostObj }
             if ($action -eq 'scan') { $ev.refresh = $true }
             Save-Json $ev (Join-Path $BuildDir 'test-event.json')
-            $out = Join-Path $EvidenceDir "test-$key-$action-$stamp.json"
+            $out = Get-EvidenceFile tests "test-$key-$action-$stamp.json"
             # A scan can take 1-3 minutes; the default CLI read timeout (60 s) would cut it off and retry.
             $meta = Invoke-Aws lambda invoke --function-name $RhelFn --cli-binary-format raw-in-base64-out `
                 --cli-read-timeout 900 --payload file://build/test-event.json $out
