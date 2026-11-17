@@ -72,6 +72,7 @@ Region `ap-southeast-5` (Asia Pacific, Malaysia). All resources are tagged `proj
 | `run-cycle.ps1` | Starts one patch cycle (`-Mode scan` or `-Mode patch`) and follows it to the end |
 | `restore-baseline.ps1` | Returns hosts to their unpatched baseline AMI (EC2 replace root volume) |
 | `exp3-scale.ps1` | Experiment 3 (scalability): launch clones, run levels from baseline (RHEL, Windows or mixed), teardown |
+| `exp4-prices.ps1` | Experiment 4 (cost): current ap-southeast-5 list prices from the AWS Price List API, saved as evidence (read-only) |
 | `evidence/` | Results of every test, cycle, restore and deploy (JSON, CSV) |
 | `site/` | Project website: landing page and results dashboard built from `evidence/` (see [Project Website](#project-website)) |
 | `build/` | Generated files (not in the repository) |
@@ -185,7 +186,8 @@ Mixed series (both platforms, testbed ratio of two RHEL hosts to one Windows hos
 
 No extra runs are needed: the metrics Lambda estimates the cost of every patch cycle from its execution
 history. The prices are environment variables (`PRICE_*`) on `serverless-patch-metrics`; check them against
-the ap-southeast-5 prices before reporting. The estimate covers the serverless control plane only
+the ap-southeast-5 prices before reporting: `.\exp4-prices.ps1` reads them from the AWS Price List API and saves them
+under `evidence\exp4-prices-*`. The estimate covers the serverless control plane only
 (Step Functions, Lambda, SNS). EC2 hosts and the VPC endpoint are excluded by design.
 
 ### Exporting Results For The Report
