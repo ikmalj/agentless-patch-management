@@ -1,4 +1,4 @@
-# Shared settings for the Phase B scripts. Dot-sourced by every script; not run on its own.
+# Shared settings for every script. Dot-sourced by the scripts; not run on its own.
 
 $Region     = 'ap-southeast-5'
 $Account    = '588589592508'
