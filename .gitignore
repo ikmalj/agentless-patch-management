@@ -7,3 +7,7 @@ grafana/
 
 # Hallmark design-check records and screenshots
 .hallmark/
+
+# Python bytecode
+__pycache__/
+*.pyc
