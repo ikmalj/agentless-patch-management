@@ -10,6 +10,8 @@ Raw results of every run, written by the scripts in the repository root. Nothing
 | `deploy/` | `deploy-framework.ps1`, `deploy-monitoring.ps1`, `deploy-site.ps1` | The latest deployment of each part, with the code hashes (`deploy-phase-b/d.json` are the earlier names) |
 | `exp3/` | `exp3-scale.ps1` | Experiment 3: clone launches, one result per level (`exp3-<series>-n<hosts>-*.json`) and the summary CSV of each series |
 | `exp4/` | `exp4-prices.ps1` | Experiment 4: ap-southeast-5 list prices from the AWS Price List API (the CSV holds the rows used, the JSON every price returned) |
+| `schedule/` | `weekly-test.ps1` | The weekly schedule's own firing: the rule before, during and after the test, fire time, start lag and execution |
 | `website/` | screenshots | Setup of the project website (CloudFront, S3, certificate, DNS) |
+| `screenshots/` | by hand | Screenshots for the report, numbered as in the screenshot run sheet |
 
 Times in file names are local (MYT, UTC+8).

@@ -73,6 +73,7 @@ Region `ap-southeast-5` (Asia Pacific, Malaysia). All resources are tagged `proj
 | `restore-baseline.ps1` | Returns hosts to their unpatched baseline AMI (EC2 replace root volume) |
 | `exp3-scale.ps1` | Experiment 3 (scalability): launch clones, run levels from baseline (RHEL, Windows or mixed), teardown |
 | `exp4-prices.ps1` | Experiment 4 (cost): current ap-southeast-5 list prices from the AWS Price List API, saved as evidence (read-only) |
+| `weekly-test.ps1` | Demonstration: lets the weekly schedule start one patch cycle on its own, then puts it back to Sunday 02:00 MYT, disabled |
 | `evidence/` | Results of every run, filed by kind: `cycles/`, `tests/`, `restore/`, `deploy/`, `exp3/`, `exp4/`, `website/` (see `evidence/README.md`) |
 | `site/` | Project website: landing page and results dashboard built from `evidence/` (see [Project Website](#project-website)) |
 | `build/` | Generated files (not in the repository) |
@@ -108,6 +109,7 @@ dashboard opens, allow its custom widgets ("Allow always").
 | Read-only checks | `.\test-rhel.ps1`, `.\test-win.ps1` | No |
 | Scan cycle | `.\run-cycle.ps1` | No |
 | Patch cycle | `.\run-cycle.ps1 -Mode patch -ViaSchedule` | **Yes** (type `PATCH`) |
+| Weekly schedule, one firing | `.\weekly-test.ps1` | **Yes**, every running PatchTarget host (type `WEEKLY`) |
 | Partial cycle | `.\run-cycle.ps1 -Mode patch -Percent 5` | **Yes** (highest severity first) |
 | One host only | `.\run-cycle.ps1 -Mode patch -Targets serverless-patch-win-01` | **Yes** |
 | Back to baseline | `.\restore-baseline.ps1 -Target rhel-01,rhel-02,win-01` | **Yes** (type `RESTORE`) |
@@ -390,7 +392,8 @@ in the account. To show it to a supervisor, share it with named email addresses 
 
 - A run without `"mode": "patch"` is **scan only**. Patch scope is **security updates only** on RHEL.
 - Only running instances tagged `PatchTarget=true` and `project=serverless-patch` are touched.
-- The weekly schedule `serverless-patch-weekly` (Sunday 02:00 MYT) is created **disabled**.
+- The weekly schedule `serverless-patch-weekly` (Sunday 02:00 MYT) is created **disabled**. `weekly-test.ps1` moves it a few
+  minutes ahead and enables it for one firing, then restores it (`-RestoreOnly` restores it on its own).
 - Microsoft Defender updates are excluded from the Windows counts by design (they update themselves).
 - No secrets are stored in this repository: credentials live in AWS Secrets Manager.
 - Lab limitations: WinRM certificate verification is skipped (self-signed certificate); SSH host keys are not pinned.
