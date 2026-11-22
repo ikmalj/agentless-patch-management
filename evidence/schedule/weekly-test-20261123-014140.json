@@ -1,0 +1,26 @@
+{
+  "schedule": "serverless-patch-weekly",
+  "rule_before": {
+    "expression": "cron(0 2 ? * SUN *)",
+    "timezone": "Asia/Kuala_Lumpur",
+    "state": "DISABLED"
+  },
+  "rule_during": {
+    "expression": "cron(10 1 ? * MON *)",
+    "timezone": "Asia/Kuala_Lumpur",
+    "state": "ENABLED",
+    "description": "TEST 2026-11-23: weekly rule moved to MON 01:10 MYT for one firing; weekly-test.ps1 restores it."
+  },
+  "rule_after": {
+    "expression": "cron(0 2 ? * SUN *)",
+    "timezone": "Asia/Kuala_Lumpur",
+    "state": "DISABLED"
+  },
+  "fire_time_myt": "2026-11-23T01:10:00",
+  "execution": "arn:aws:states:ap-southeast-5:588589592508:execution:serverless-patch-cycle:066b0321-e870-4dfc-afdd-c42708a2c43c",
+  "execution_started_myt": "2026-11-23T01:10:32",
+  "start_lag_s": 32.0,
+  "execution_input": "{\"mode\":\"patch\",\"reboot\":true}",
+  "status": "SUCCEEDED",
+  "cycle_evidence": "cycle-patch-066b0321-e870-4dfc-afdd-c42708a2c43c.json"
+}
